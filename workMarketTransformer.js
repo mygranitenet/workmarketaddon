@@ -25,6 +25,15 @@ export class WorkMarketTransformer {
         this.ui = new UIManager(this.SCRIPT_PREFIX);
         this.mainOverlayContentTarget = this.ui.getMainOverlayContentTarget();
 
+        this.filterText = '';
+        const filterInput = document.getElementById('assignmentFilterInput');
+        if (filterInput) {
+            filterInput.addEventListener('input', () => {
+                this.filterText = filterInput.value.toLowerCase();
+                this.applyFilterAndRender();
+            });
+        }
+
         console.log(`${this.SCRIPT_PREFIX} Constructor finished. Setting up content observer/poller...`);
         this.waitForAssignmentsAndInitialize();
     }
@@ -87,7 +96,7 @@ export class WorkMarketTransformer {
         const header = this.activeTableHeaders.find(h => h.key === columnKey); if (!header || !header.sortable) return;
         if (this.tableData.some(item => item.applicantDetailsDisplay === 'Loading...') && (columnKey === 'applicantDetailsDisplay' || columnKey === 'appliedCount')) { console.log(`${this.SCRIPT_PREFIX} Worker data still loading, please wait to sort these columns.`); return; }
         if (this.currentSort.column === columnKey) { this.currentSort.direction = this.currentSort.direction === 'asc' ? 'desc' : 'asc'; } else { this.currentSort.column = columnKey; this.currentSort.direction = 'asc'; }
-        this.sortData(); if (this.mainOverlayContentTarget) { this.renderTable(this.tableData, this.activeTableHeaders, this.mainOverlayContentTarget); }
+        this.sortData(); if (this.mainOverlayContentTarget) { this.applyFilterAndRender(); }
     }
 
     sortData() {
@@ -97,6 +106,13 @@ export class WorkMarketTransformer {
 
     updateSortIndicators() {
         const table = document.getElementById('customAssignmentsTable_overlay'); if (!table) return; table.querySelectorAll('thead th .sort-arrow').forEach(arrow => arrow.className = 'sort-arrow'); const activeHeaderInfo = this.activeTableHeaders.find(h => h.key === this.currentSort.column); if (activeHeaderInfo && activeHeaderInfo.sortable) { const activeThArrow = table.querySelector(`thead th[data-column="${this.currentSort.column}"] .sort-arrow`); if (activeThArrow) activeThArrow.classList.add(this.currentSort.direction); }
+    }
+
+    applyFilterAndRender() {
+        const filtered = this.filterText
+            ? this.tableData.filter(item => (item.title || '').toLowerCase().includes(this.filterText))
+            : this.tableData;
+        this.renderTable(filtered, this.activeTableHeaders, this.mainOverlayContentTarget);
     }
 
     showPrevTechInModal() {
@@ -143,7 +159,7 @@ export class WorkMarketTransformer {
                 if (observerInstance) observerInstance.disconnect(); this.transformationInitialized = true;
                 this.initializeTransformationSequence().catch(err => console.error(`${this.SCRIPT_PREFIX} Error (polling init):`, err));
             } else if (pollAttempts < maxPollAttempts) { setTimeout(pollForItems, pollInterval); }
-            else { console.warn(`${this.SCRIPT_PREFIX} Max polling attempts reached. Items NOT FOUND using "${this.assignmentItemSelector}". HTML:`, this.originalResultsContainerSource.innerHTML.substring(0, 1000) + "..."); if (this.mainOverlayContentTarget) { this.renderTable([], this.activeTableHeaders, this.mainOverlayContentTarget); if(this.ui.mainOverlay) this.ui.showMainOverlay(); } }
+                else { console.warn(`${this.SCRIPT_PREFIX} Max polling attempts reached. Items NOT FOUND using "${this.assignmentItemSelector}". HTML:`, this.originalResultsContainerSource.innerHTML.substring(0, 1000) + "..."); if (this.mainOverlayContentTarget) { this.tableData = []; this.applyFilterAndRender(); if(this.ui.mainOverlay) this.ui.showMainOverlay(); } }
         };
         pollForItems();
     }
@@ -156,11 +172,11 @@ export class WorkMarketTransformer {
         const originalAssignmentNodes = Array.from(this.originalResultsContainerSource.querySelectorAll(this.assignmentItemSelector));
         if (originalAssignmentNodes.length === 0) { console.warn(`${this.SCRIPT_PREFIX} No assignment items found with selector "${this.assignmentItemSelector}". HTML:`, this.originalResultsContainerSource.innerHTML.substring(0, 500) + "..."); this.renderTable([], this.activeTableHeaders, this.mainOverlayContentTarget); if(this.ui.mainOverlay) this.ui.showMainOverlay(); return; }
         const initialTableData = originalAssignmentNodes.map(itemNode => { const data = {}; const getText = (selector) => itemNode.querySelector(selector)?.textContent.trim() || ''; data.title = getText('div[style="float: left;"] > strong > a .title'); data.assignmentId = itemNode.querySelector('.assignmentId')?.id || getText('ul.assignment-actions li.fr em').match(/Assign\. ID: (\d+)/)?.[1]; data.applicantDetailsDisplay = 'Loading...'; data.appliedCount = '...'; const fullDateString = getText('.date small.meta span'); const dateParts = this.parseFullDateToParts(fullDateString); if (dateParts && typeof dateParts === 'object') { data.parsedDate = dateParts.date; data.parsedTime = dateParts.time; data.timestamp = dateParts.timestamp; } else { data.parsedDate = 'N/A'; data.parsedTime = 'N/A'; data.timestamp = 0; } return data; });
-        this.tableData = initialTableData; this.sortData(); this.renderTable(this.tableData, this.activeTableHeaders, this.mainOverlayContentTarget); if(this.ui.mainOverlay) this.ui.showMainOverlay();
+        this.tableData = initialTableData; this.sortData(); this.applyFilterAndRender(); if(this.ui.mainOverlay) this.ui.showMainOverlay();
         this.tableData = await this.extractAssignmentsData(originalAssignmentNodes);
         if (this.tableData.length === 0 && originalAssignmentNodes.length > 0) { console.warn(`${this.SCRIPT_PREFIX} Original nodes were found, but full extraction resulted in 0 items.`); }
         const defaultSortHeader = this.activeTableHeaders.find(h => h.key === this.currentSort.column && h.sortable); if (!defaultSortHeader) { const firstSortableColumn = this.activeTableHeaders.find(h => h.sortable); if (firstSortableColumn) { this.currentSort.column = firstSortableColumn.key; this.currentSort.direction = (firstSortableColumn.type === 'date' || firstSortableColumn.type === 'number') ? 'desc' : 'asc'; } } else { if (this.currentSort.column === 'timestamp') { const dateHeader = this.activeTableHeaders.find(h => h.sortKey === 'timestamp'); if (dateHeader) this.currentSort.column = dateHeader.key; } }
-        this.sortData(); this.renderTable(this.tableData, this.activeTableHeaders, this.mainOverlayContentTarget);
+        this.sortData(); this.applyFilterAndRender();
         console.log(`${this.SCRIPT_PREFIX} All transformations complete. Final table rendered in overlay with ${this.tableData.length} assignments.`);
     }
 } // End of WorkMarketTransformer class

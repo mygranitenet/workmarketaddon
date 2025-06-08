@@ -2,6 +2,6 @@ workmarket-transformer/
 ├── css.js                  // Contains the customCss string
 ├── utils.js                // Contains helper functions like parseFullDateToParts, parseLocationString, formatValue
 ├── scoreCalculator.js      // Contains calculateOverallScore and its sub-component logic
-├── uiManager.js            // Contains methods for creating/managing main overlay and tech modal
-├── workMarketTransformer.js // The main class, orchestrating everything
+├── uiManager.js            // Contains methods for creating/managing main overlay and tech modal (now includes a filter input)
+├── workMarketTransformer.js // The main class, orchestrating everything and applies the filter
 └── main.js                 // The entry point script (what you'd inject or use as the base for userscript)

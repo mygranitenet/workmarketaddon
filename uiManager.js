@@ -50,7 +50,7 @@ export class UIManager {
 
         const header = document.createElement('div');
         header.className = 'overlay-header';
-        header.innerHTML = `<span>WorkMarket Enhanced Assignments</span><div class="overlay-controls"><button class="overlay-minimize-btn" title="Minimize">_</button><button class="overlay-maximize-btn" title="Maximize">□</button><button class="overlay-close-btn" title="Hide">X</button></div>`;
+        header.innerHTML = `<span>WorkMarket Enhanced Assignments</span><input id="assignmentFilterInput" type="text" placeholder="Filter..." style="margin-left:10px;flex-grow:1;max-width:200px;"/><div class="overlay-controls"><button class="overlay-minimize-btn" title="Minimize">_</button><button class="overlay-maximize-btn" title="Maximize">□</button><button class="overlay-close-btn" title="Hide">X</button></div>`;
 
         this.mainOverlayContentTarget = document.createElement('div');
         this.mainOverlayContentTarget.className = 'overlay-content';
