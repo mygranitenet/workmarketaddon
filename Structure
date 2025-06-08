@@ -1,7 +1,0 @@
-workmarket-transformer/
-├── css.js                  // Contains the customCss string
-├── utils.js                // Contains helper functions like parseFullDateToParts, parseLocationString, formatValue
-├── scoreCalculator.js      // Contains calculateOverallScore and its sub-component logic
-├── uiManager.js            // Contains methods for creating/managing main overlay and tech modal
-├── workMarketTransformer.js // The main class, orchestrating everything
-└── main.js                 // The entry point script (what you'd inject or use as the base for userscript)
