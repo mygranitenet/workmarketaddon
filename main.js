@@ -269,12 +269,12 @@ class WorkMarketTransformer {
     doDragTechModal(e) { if (!this.techModalIsDragging) return; const modalContent = document.getElementById('techDetailModalOverlay')?.querySelector('.tech-modal-content'); if (!modalContent) return; modalContent.style.left = (e.clientX - this.techModalDragStartX) + 'px'; modalContent.style.top = (e.clientY - this.techModalDragStartY) + 'px'; }
     stopDragTechModal() { this.techModalIsDragging = false; const modalOverlay = document.getElementById('techDetailModalOverlay'); if(modalOverlay) modalOverlay.style.userSelect = ''; document.removeEventListener('mousemove', this.doDragTechModalBound); document.removeEventListener('mouseup', this.stopDragTechModalBound); }
 
-    showTechDetailsModal(techFullDataWithScores, assignmentIdForModal, techIndexInAssignment) {
+        showTechDetailsModal(techFullDataWithScores, assignmentIdForModal, techIndexInAssignment) {
         this.currentModalAssignmentId = assignmentIdForModal;
         this.currentModalTechIndex = techIndexInAssignment;
         const techRawData = techFullDataWithScores;
 
-        // console.log(`${this.SCRIPT_PREFIX} Showing modal for tech (Assign: ${assignmentIdForModal}, Index: ${techIndexInAssignment}):`, techRawData.company_name || techRawData.name);
+        console.log(`${this.SCRIPT_PREFIX} Showing modal for tech (Assign: ${assignmentIdForModal}, Index: ${techIndexInAssignment}):`, techRawData.company_name || techRawData.name);
 
         let modalOverlay = document.getElementById('techDetailModalOverlay');
         if (!modalOverlay) { this.createTechModal(); modalOverlay = document.getElementById('techDetailModalOverlay'); }
@@ -293,7 +293,6 @@ class WorkMarketTransformer {
             assignmentTitleLinkEl.innerHTML = `Assignment ID: ${assignmentIdForModal}`;
         }
 
-
         if (techRawData.OverallScore !== undefined) {
             modalScoreDisplay.innerHTML = `Overall Score: ${techRawData.OverallScore}
                 <span style="font-size:0.8em; display:block;">(Cost: ${techRawData.CostScore}, Dist: ${techRawData.DistanceScore}, Stats: ${techRawData.StatsScore})</span>
@@ -303,31 +302,46 @@ class WorkMarketTransformer {
             modalScoreDisplay.style.display = 'none';
         }
 
-        const prevBtn = modalOverlay.querySelector('#prevTechBtn'); const nextBtn = modalOverlay.querySelector('#nextTechBtn'); const counter = modalOverlay.querySelector('#techCounter');
+        const prevBtn = modalOverlay.querySelector('#prevTechBtn');
+        const nextBtn = modalOverlay.querySelector('#nextTechBtn');
+        const counter = modalOverlay.querySelector('#techCounter');
         const techsForCurrentAssignment = this.currentAssignmentTechsData[assignmentIdForModal] || [];
-        prevBtn.disabled = techIndexInAssignment <= 0; nextBtn.disabled = techIndexInAssignment >= techsForCurrentAssignment.length - 1;
+        prevBtn.disabled = techIndexInAssignment <= 0;
+        nextBtn.disabled = techIndexInAssignment >= techsForCurrentAssignment.length - 1;
         counter.textContent = `${techIndexInAssignment + 1} of ${techsForCurrentAssignment.length}`;
+
+        // **** DEFINE priorityFields HERE ****
+        const priorityFields = [
+            { key: 'user_uuid', label: 'User Profile' }, { key: 'name', label: 'Contact Name' },
+            { key: 'company_name', label: 'Company' }, { key: 'email', label: 'Email' },
+            { key: 'work_phone', label: 'Work Phone' }, { key: 'mobile_phone', label: 'Mobile Phone' },
+            { key: 'address', label: 'Address' }, { key: 'distance', label: 'Distance' },
+            { key: 'status', label: 'Invitation Status' }, { key: 'sent_on', label: 'Sent On' },
+            { key: 'declined_on', label: 'Declined On' }, { key: 'question_pending', label: 'Question Pending?' },
+            { key: 'has_negotiation', label: 'Has Negotiation?' }, { key: 'schedule_conflict', label: 'Schedule Conflict?' }
+        ];
 
         const renderKeyValuePair = (key, value, parentEl, isNested = false, path = '') => {
             const formattedValue = this.formatValue(value, key);
             const hideIfNo = ['question_pending', 'schedule_conflict', 'is_expired', 'is_schedule_negotiation', 'is_best_price', 'tiered_pricing_accepted'];
 
-            if (formattedValue === 'N/A' && !(key === 'declined_on' && value === '')) { return; } // Skip N/A generally
-            if (hideIfNo.includes(key) && formattedValue === 'No') { return; } // Skip specific "No" booleans
+            if (formattedValue === 'N/A' && !(key === 'declined_on' && value === '')) { return; }
+            if (hideIfNo.includes(key) && formattedValue === 'No') { return; }
 
             const dt = document.createElement('dt');
-            dt.textContent = (key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())) + ':';
-            if (isNested) dt.style.paddingLeft = '15px';
+            // Use the label from priorityFields if available, otherwise generate one
+            const priorityFieldEntry = priorityFields.find(pf => pf.key === key); // Check against the priorityFields defined in the outer scope
+            dt.textContent = (priorityFieldEntry?.label || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())) + ':';
 
+            if (isNested) dt.style.paddingLeft = '15px';
             const dd = document.createElement('dd');
             if (key === 'user_uuid') { dd.innerHTML = `<a href="https://www.workmarket.com/new-profile/${value}" target="_blank">${value}</a>`; }
             else if (key === 'email' && value) { const subject = encodeURIComponent(`Question regarding WO: ${currentAssignment?.title || this.currentModalAssignmentId || 'Assignment'}`); dd.innerHTML = `<a href="mailto:${value}?subject=${subject}&body=I have a question:">${value}</a>`; }
             else if ((key === 'work_phone' || key === 'mobile_phone') && value) { dd.innerHTML = `<a href="tel:${String(value).replace(/\D/g,'')}">${value}</a>`; }
             else if (key === 'address' && value) { dd.innerHTML = `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(value)}" target="_blank">${value}</a>`; }
-            // else if (key === 'graniteTicket' && value) { // Assuming graniteTicket is on the main assignment, not tech
-            //     dd.innerHTML = `<a href="YOUR_TICKET_SYSTEM_BASE_URL/${value}" target="_blank">${value}</a>`;
-            // }
-            else {
+            else if (key === 'graniteTicket' && value && this.tableData.some(a => a.assignmentId === assignmentIdForModal && a.graniteTicket === value)) {
+                dd.textContent = formattedValue; // Placeholder for actual ticket link
+            } else {
                 dd.textContent = formattedValue;
                 if (key === 'is_best_price' && formattedValue === 'Yes') {
                     dd.classList.add('value-yes');
@@ -338,54 +352,55 @@ class WorkMarketTransformer {
 
         const renderSection = (title, dataObject, parentEl, isTopLevelSection = true, fieldOrder = null) => {
             if (!dataObject || Object.keys(dataObject).length === 0) return;
-
-            // Check if section should be entirely hidden (for Negotiation Details)
-            if (title === 'Negotiation Details') {
-                const negBooleans = ['is_expired', 'is_price_negotiation', 'is_schedule_negotiation', 'is_best_price', 'tiered_pricing_accepted'];
-                let hasTrueBooleanOrOtherData = false;
-                for (const negKey in dataObject) {
-                    if (negKey === 'pricing' && dataObject[negKey] && Object.keys(dataObject[negKey]).length > 0) { hasTrueBooleanOrOtherData = true; break;}
-                    if (negBooleans.includes(negKey)) { if (dataObject[negKey] === true) { hasTrueBooleanOrOtherData = true; break;} }
-                    else if (dataObject[negKey] !== null && String(dataObject[negKey]).trim() !== '') { hasTrueBooleanOrOtherData = true; break;} // Check for other non-empty data
-                }
-                if (!hasTrueBooleanOrOtherData) return; // Hide entire negotiation section
-            }
-
-
             if (isTopLevelSection) {
                 const headerDt = document.createElement('dt');
                 headerDt.className = 'section-header-dt'; headerDt.textContent = title;
                 parentEl.appendChild(headerDt);
             }
-
             const keysToIterate = fieldOrder || Object.keys(dataObject);
-
             for (const key of keysToIterate) {
                 if (dataObject.hasOwnProperty(key)) {
                     const value = dataObject[key];
                     if ((title.includes('Scorecard (For Your Company)') || title.includes('Scorecard (Overall Platform)')) && typeof value === 'object' && value !== null && value.hasOwnProperty('all')) {
                          renderKeyValuePair.call(this, key, value.all, parentEl, true, title + '.' + key);
-                    } else if (title.includes('Pricing') || (title === 'Negotiation Details' && key !== 'pricing') || title.includes('Rating Details') || (title.includes('Scorecard') && typeof value !== 'object')) {
+                    }
+                    else if (title.includes('Pricing') || (title === 'Negotiation Details' && key !== 'pricing') || title.includes('Rating Details') || (title.includes('Scorecard') && typeof value !== 'object')) {
+                         if (typeof value !== 'object' || value === null) {
+                            renderKeyValuePair.call(this, key, value, parentEl, true, title + '.' + key);
+                         } else {
+                            renderSection.call(this, key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), value, parentEl, false);
+                         }
+                    }
+                    else if (!isTopLevelSection && (typeof value !== 'object' || value === null)) {
                          renderKeyValuePair.call(this, key, value, parentEl, true, title + '.' + key);
-                    } else if (key === 'pricing' && title === 'Negotiation Details' && value && typeof value === 'object') { // Special handling for pricing within negotiation
-                        renderSection.call(this, 'Pricing', value, parentEl, false);
-                    } else if (key === 'rating' && title.includes('Scorecard') && value && typeof value === 'object') { // Special handling for rating within scorecard
-                        renderSection.call(this, 'Rating Breakdown', value, parentEl, false);
                     }
                 }
             }
         };
 
         priorityFields.forEach(pf => { if (techRawData.hasOwnProperty(pf.key)) { renderKeyValuePair.call(this, pf.key, techRawData[pf.key], detailsGrid, false, pf.key); } });
-        if (techRawData.has_negotiation && techRawData.negotiation) {
-            // Order for negotiation sub-fields, pricing will be handled last by renderSection
-            const negotiationFieldOrder = ['approval_status', 'requested_on_date', 'requested_on_fuzzy', 'is_expired', 'is_price_negotiation', 'is_schedule_negotiation', 'is_best_price', 'tiered_pricing_accepted', 'note'];
-            renderSection.call(this, 'Negotiation Details', techRawData.negotiation, detailsGrid, true, negotiationFieldOrder);
-        }
-        if (techRawData.resource_scorecard_for_company) { renderSection.call(this, 'Scorecard (For Your Company)', techRawData.resource_scorecard_for_company.values, detailsGrid); if(techRawData.resource_scorecard_for_company.rating){renderSection.call(this, 'Company Rating Details', techRawData.resource_scorecard_for_company.rating, detailsGrid);} }
-        if (techRawData.resource_scorecard) { renderSection.call(this, 'Scorecard (Overall Platform)', techRawData.resource_scorecard.values, detailsGrid); if(techRawData.resource_scorecard.rating){renderSection.call(this, 'Overall Rating Details', techRawData.resource_scorecard.rating, detailsGrid);} }
 
-        const keysToExclude = [ /* ... same as V9 ... */ ];
+        if (techRawData.has_negotiation && techRawData.negotiation) {
+            const negDetails = techRawData.negotiation;
+            const negBooleans = ['is_expired', 'is_price_negotiation', 'is_schedule_negotiation', 'is_best_price', 'tiered_pricing_accepted'];
+            let hasSignificantNegData = Object.keys(negDetails).some(k => {
+                if (negBooleans.includes(k)) return negDetails[k] === true;
+                if (k === 'pricing') return negDetails.pricing && Object.keys(negDetails.pricing).length > 0;
+                return negDetails[k] !== null && String(negDetails[k]).trim() !== '';
+            });
+            if (hasSignificantNegData) {
+                const negotiationFieldOrder = ['approval_status', 'requested_on_date', 'requested_on_fuzzy', 'is_expired', 'is_price_negotiation', 'is_schedule_negotiation', 'is_best_price', 'tiered_pricing_accepted', 'note']; // pricing is handled after
+                renderSection.call(this, 'Negotiation Details', negDetails, detailsGrid, true, negotiationFieldOrder.filter(k => k !== 'pricing')); // Exclude pricing for now
+                if (negDetails.pricing) {
+                    renderSection.call(this, 'Pricing', negDetails.pricing, detailsGrid, false); // Render pricing under Negotiation Details
+                }
+            }
+        }
+
+        if (techRawData.resource_scorecard_for_company) { if (techRawData.resource_scorecard_for_company.values) { renderSection.call(this, 'Scorecard (For Your Company)', techRawData.resource_scorecard_for_company.values, detailsGrid); } if(techRawData.resource_scorecard_for_company.rating){renderSection.call(this, 'Company Rating Details', techRawData.resource_scorecard_for_company.rating, detailsGrid);} }
+        if (techRawData.resource_scorecard) { if (techRawData.resource_scorecard.values) { renderSection.call(this, 'Scorecard (Overall Platform)', techRawData.resource_scorecard.values, detailsGrid); } if(techRawData.resource_scorecard.rating){renderSection.call(this, 'Overall Rating Details', techRawData.resource_scorecard.rating, detailsGrid);} }
+
+        const keysToExclude = [ 'avatar_uri', 'avatar_asset_uri', 'user_uuid', 'encrypted_id', 'valuesWithStringKey', 'tieredPricingMetaData', 'labels', 'dispatcher', 'resource_scorecard_for_company', 'resource_scorecard', 'OverallScore', 'CostScore', 'DistanceScore', 'StatsScore', 'CPS_Final', 'IPS', 'assignmentId', 'raw_worker_data', 'user_id', 'user_number', 'latitude', 'longitude', 'new_user', 'rating_text', 'company_rating_text', 'lane', 'assign_to_first_to_accept', 'blocked', 'name', 'company_name', 'email', 'work_phone', 'mobile_phone', 'address', 'distance', 'status', 'sent_on', 'declined_on', 'question_pending', 'has_negotiation', 'schedule_conflict', 'negotiation', 'targeted' ];
         let hasOtherDetails = false; const otherDetailsFragment = document.createDocumentFragment();
         for (const key in techRawData) { if (techRawData.hasOwnProperty(key) && !keysToExclude.includes(key) && !priorityFields.find(pf => pf.key === key)) { const value = techRawData[key]; if (value !== null && value !== undefined && String(value).trim() !== '') { if(!hasOtherDetails){ const otherDt = document.createElement('dt'); otherDt.className = 'section-header-dt'; otherDt.textContent = 'Other Raw Details'; otherDetailsFragment.appendChild(otherDt); hasOtherDetails = true; } renderKeyValuePair.call(this, key, value, otherDetailsFragment, false, key); } } }
         if(hasOtherDetails) detailsGrid.appendChild(otherDetailsFragment);
