@@ -38,6 +38,8 @@
         .custom-sortable-table .col-assign-id { min-width: 65px; }
         .custom-sortable-table .col-updated { min-width: 100px; }
         .custom-sortable-table .loading-workers { font-style: italic; color: #777; }
+        .overlay-filter-container { padding: 5px 10px; background-color: #f0f0f0; }
+        .overlay-filter-input { width: 100%; box-sizing: border-box; padding: 4px 6px; margin-bottom: 6px; font-size: 0.9em; }
         .tech-detail-link { color: #007bff; text-decoration: none; cursor: pointer; }
         .tech-detail-link:hover { text-decoration: underline; }
         .cost-na { color: green; font-weight: bold; }
@@ -115,6 +117,8 @@ class WorkMarketTransformer {
         this.observer = null;
         this.mainOverlay = null;
         this.mainOverlayContentTarget = null;
+        this.filterInput = null;
+        this.filterQuery = '';
         this.isDraggingOverlay = false; this.isResizingOverlay = false;
         this.overlayDragStartX = 0; this.overlayDragStartY = 0;
         this.overlayOriginalWidth = 0; this.overlayOriginalHeight = 0;
@@ -224,11 +228,151 @@ class WorkMarketTransformer {
         return Promise.all(assignmentsPromises);
     }
 
-    renderTable(dataToRender, headersToRender, targetContainer) { if (!targetContainer) { console.error(`${this.SCRIPT_PREFIX} renderTable: Target container for table is not defined.`); return; } targetContainer.innerHTML = ''; const table = document.createElement('table'); table.id = 'customAssignmentsTable_overlay'; table.className = 'custom-sortable-table'; const thead = table.createTHead(); const headerRow = thead.insertRow(); headersToRender.forEach(headerInfo => { const th = document.createElement('th'); th.className = headerInfo.className || ''; if (headerInfo.sortable) { th.dataset.column = headerInfo.key; th.dataset.type = headerInfo.type; th.dataset.sortKey = headerInfo.sortKey || headerInfo.key; th.innerHTML = `${headerInfo.name} <span class="sort-arrow"></span>`; th.addEventListener('click', () => this.handleSort(headerInfo.key)); } else { th.textContent = headerInfo.name; } headerRow.appendChild(th); }); const tbody = table.createTBody(); if (dataToRender.length === 0) { const row = tbody.insertRow(); const cell = row.insertCell(); cell.colSpan = headersToRender.length; cell.textContent = "No assignments found or processed."; cell.style.textAlign = "center"; cell.style.padding = "20px"; } else { dataToRender.forEach((item) => { const row = tbody.insertRow(); headersToRender.forEach(headerInfo => { const cell = row.insertCell(); cell.className = headerInfo.className || ''; if (item.applicantDetailsDisplay === 'Loading...' && (headerInfo.key === 'applicantDetailsDisplay' || headerInfo.key === 'appliedCount')) { cell.classList.add('loading-workers'); } if (headerInfo.key === 'checkbox') { const chk = document.createElement('input'); chk.type = 'checkbox'; chk.value = item.checkboxValue; chk.checked = item.isChecked; chk.name = "work_ids[]"; chk.id = `work_id_inj_overlay_${item.checkboxValue}`; cell.appendChild(chk); } else if (headerInfo.key === 'title') { const link = document.createElement('a'); link.href = item.detailsLink; link.textContent = item.title; link.setAttribute('aria-label', item.ariaLabel || item.title); link.className = 'tooltipped tooltipped-n'; cell.appendChild(link); } else if (headerInfo.key === 'applicantDetailsDisplay') { cell.innerHTML = item[headerInfo.key] || ''; cell.querySelectorAll('.tech-detail-link').forEach(link => { link.addEventListener('click', (e) => { e.preventDefault(); const assignmentId = e.target.dataset.assignmentId; const techIndex = parseInt(e.target.dataset.techIndex, 10); if (this.currentAssignmentTechsData[assignmentId] && this.currentAssignmentTechsData[assignmentId][techIndex] !== undefined) { this.showTechDetailsModal(this.currentAssignmentTechsData[assignmentId][techIndex], assignmentId, techIndex); } else { console.error('Tech data not found for modal:', assignmentId, techIndex, this.currentAssignmentTechsData); alert('Error: Detailed tech data not found.'); } }); }); } else { cell.textContent = item[headerInfo.key] !== undefined ? String(item[headerInfo.key]) : ''; } }); }); } targetContainer.appendChild(table); this.updateSortIndicators(); }
+    renderTable(dataToRender, headersToRender, targetContainer) {
+        if (!targetContainer) {
+            console.error(`${this.SCRIPT_PREFIX} renderTable: Target container for table is not defined.`);
+            return;
+        }
+        let filteredData = dataToRender;
+        if (this.filterQuery) {
+            const q = this.filterQuery;
+            filteredData = dataToRender.filter(it => {
+                return ['title','city','state','labels','assignmentId','siteName','status'].some(f => String(it[f] || '').toLowerCase().includes(q));
+            });
+        }
+        targetContainer.innerHTML = '';
+        const table = document.createElement('table');
+        table.id = 'customAssignmentsTable_overlay';
+        table.className = 'custom-sortable-table';
+
+        const thead = table.createTHead();
+        const headerRow = thead.insertRow();
+        headersToRender.forEach(headerInfo => {
+            const th = document.createElement('th');
+            th.className = headerInfo.className || '';
+            if (headerInfo.sortable) {
+                th.dataset.column = headerInfo.key;
+                th.dataset.type = headerInfo.type;
+                th.dataset.sortKey = headerInfo.sortKey || headerInfo.key;
+                th.innerHTML = `${headerInfo.name} <span class="sort-arrow"></span>`;
+                th.addEventListener('click', () => this.handleSort(headerInfo.key));
+            } else {
+                th.textContent = headerInfo.name;
+            }
+            headerRow.appendChild(th);
+        });
+
+        const tbody = table.createTBody();
+        if (filteredData.length === 0) {
+            const row = tbody.insertRow();
+            const cell = row.insertCell();
+            cell.colSpan = headersToRender.length;
+            cell.textContent = "No assignments found or processed.";
+            cell.style.textAlign = "center";
+            cell.style.padding = "20px";
+        } else {
+            filteredData.forEach((item) => {
+                const row = tbody.insertRow();
+                headersToRender.forEach(headerInfo => {
+                    const cell = row.insertCell();
+                    cell.className = headerInfo.className || '';
+                    if (item.applicantDetailsDisplay === 'Loading...' && (headerInfo.key === 'applicantDetailsDisplay' || headerInfo.key === 'appliedCount')) {
+                        cell.classList.add('loading-workers');
+                    }
+                    if (headerInfo.key === 'checkbox') {
+                        const chk = document.createElement('input');
+                        chk.type = 'checkbox';
+                        chk.value = item.checkboxValue;
+                        chk.checked = item.isChecked;
+                        chk.name = "work_ids[]";
+                        chk.id = `work_id_inj_overlay_${item.checkboxValue}`;
+                        cell.appendChild(chk);
+                    } else if (headerInfo.key === 'title') {
+                        const link = document.createElement('a');
+                        link.href = item.detailsLink;
+                        link.textContent = item.title;
+                        link.setAttribute('aria-label', item.ariaLabel || item.title);
+                        link.className = 'tooltipped tooltipped-n';
+                        cell.appendChild(link);
+                    } else if (headerInfo.key === 'applicantDetailsDisplay') {
+                        cell.innerHTML = item[headerInfo.key] || '';
+                        cell.querySelectorAll('.tech-detail-link').forEach(link => {
+                            link.addEventListener('click', (e) => {
+                                e.preventDefault();
+                                const assignmentId = e.target.dataset.assignmentId;
+                                const techIndex = parseInt(e.target.dataset.techIndex, 10);
+                                if (this.currentAssignmentTechsData[assignmentId] && this.currentAssignmentTechsData[assignmentId][techIndex] !== undefined) {
+                                    this.showTechDetailsModal(this.currentAssignmentTechsData[assignmentId][techIndex], assignmentId, techIndex);
+                                } else {
+                                    console.error('Tech data not found for modal:', assignmentId, techIndex, this.currentAssignmentTechsData);
+                                    alert('Error: Detailed tech data not found.');
+                                }
+                            });
+                        });
+                    } else {
+                        cell.textContent = item[headerInfo.key] !== undefined ? String(item[headerInfo.key]) : '';
+                    }
+                });
+            });
+        }
+        targetContainer.appendChild(table);
+        this.updateSortIndicators();
+    }
     handleSort(columnKey) { const header = this.activeTableHeaders.find(h => h.key === columnKey); if (!header || !header.sortable) return; if (this.tableData.some(item => item.applicantDetailsDisplay === 'Loading...') && (columnKey === 'applicantDetailsDisplay' || columnKey === 'appliedCount')) { console.log(`${this.SCRIPT_PREFIX} Worker data still loading, please wait to sort these columns.`); return; } if (this.currentSort.column === columnKey) { this.currentSort.direction = this.currentSort.direction === 'asc' ? 'desc' : 'asc'; } else { this.currentSort.column = columnKey; this.currentSort.direction = 'asc'; } this.sortData(); if (this.mainOverlayContentTarget) { this.renderTable(this.tableData, this.activeTableHeaders, this.mainOverlayContentTarget); } }
     sortData() { const { column, direction } = this.currentSort; const header = this.activeTableHeaders.find(h => h.key === column); if (!header || !header.sortable) return; const sortKey = header.sortKey || column; this.tableData.sort((a, b) => { let valA = a[sortKey]; let valB = b[sortKey]; if (sortKey === 'applicantDetailsDisplay' || sortKey === 'appliedCount') { const errorOrLoadingValues = ['error', 'fetch error', 'no id', 'loading...', '...']; if (sortKey === 'appliedCount') { if (typeof valA === 'string' && errorOrLoadingValues.includes(String(valA).toLowerCase())) { } else valA = Number(valA); if (typeof valB === 'string' && errorOrLoadingValues.includes(String(valB).toLowerCase())) { } else valB = Number(valB); } const isValALoadingError = typeof valA === 'string' && errorOrLoadingValues.includes(valA.toLowerCase()); const isValBLoadingError = typeof valB === 'string' && errorOrLoadingValues.includes(valB.toLowerCase()); if (isValALoadingError && !isValBLoadingError) return direction === 'asc' ? 1 : -1; if (!isValALoadingError && isValBLoadingError) return direction === 'asc' ? -1 : 1; if (isValALoadingError && isValBLoadingError) { valA = String(valA || '').toLowerCase(); valB = String(valB || '').toLowerCase(); } } if (typeof valA === 'string' && sortKey !== 'timestamp' && !(typeof valA === 'number')) valA = (valA || '').toLowerCase(); if (typeof valB === 'string' && sortKey !== 'timestamp' && !(typeof valB === 'number')) valB = (valB || '').toLowerCase(); if (valA < valB) return direction === 'asc' ? -1 : 1; if (valA > valB) return direction === 'asc' ? 1 : -1; return 0; }); }
     updateSortIndicators() { const table = document.getElementById('customAssignmentsTable_overlay'); if (!table) return; table.querySelectorAll('thead th .sort-arrow').forEach(arrow => arrow.className = 'sort-arrow'); const activeHeaderInfo = this.activeTableHeaders.find(h => h.key === this.currentSort.column); if (activeHeaderInfo && activeHeaderInfo.sortable) { const activeThArrow = table.querySelector(`thead th[data-column="${this.currentSort.column}"] .sort-arrow`); if (activeThArrow) activeThArrow.classList.add(this.currentSort.direction); } }
-    createMainOverlay() { if (document.getElementById('wmTransformerOverlay')) { this.mainOverlay = document.getElementById('wmTransformerOverlay'); this.mainOverlayContentTarget = this.mainOverlay.querySelector('.overlay-content'); console.log(`${this.SCRIPT_PREFIX} Main overlay already exists. Re-using (listeners might need re-attaching if this instance is new and old one was not cleaned properly).`); return; } this.mainOverlay = document.createElement('div'); this.mainOverlay.id = 'wmTransformerOverlay'; this.mainOverlay.className = 'wm-transformer-overlay'; this.mainOverlay.style.display = 'none'; const header = document.createElement('div'); header.className = 'overlay-header'; header.innerHTML = `<span>WorkMarket Enhanced Assignments</span><div class="overlay-controls"><button class="overlay-minimize-btn" title="Minimize">_</button><button class="overlay-maximize-btn" title="Maximize">□</button><button class="overlay-close-btn" title="Hide">X</button></div>`; this.mainOverlayContentTarget = document.createElement('div'); this.mainOverlayContentTarget.className = 'overlay-content'; this.mainOverlayContentTarget.id = 'assignment_list_results_overlay_content'; const resizeHandle = document.createElement('div'); resizeHandle.className = 'overlay-resize-handle'; this.mainOverlay.appendChild(header); this.mainOverlay.appendChild(this.mainOverlayContentTarget); this.mainOverlay.appendChild(resizeHandle); document.body.appendChild(this.mainOverlay); header.addEventListener('mousedown', this.startDragOverlayBound); resizeHandle.addEventListener('mousedown', this.startResizeOverlayBound); header.querySelector('.overlay-minimize-btn').addEventListener('click', () => this.mainOverlay.classList.toggle('minimized')); header.querySelector('.overlay-maximize-btn').addEventListener('click', () => this.toggleMaximizeOverlay()); header.querySelector('.overlay-close-btn').addEventListener('click', () => { if(this.mainOverlay) this.mainOverlay.style.display = 'none'; }); console.log(`${this.SCRIPT_PREFIX} Main table overlay created.`); }
+    createMainOverlay() {
+        if (document.getElementById('wmTransformerOverlay')) {
+            this.mainOverlay = document.getElementById('wmTransformerOverlay');
+            this.mainOverlayContentTarget = this.mainOverlay.querySelector('.overlay-content');
+            this.filterInput = this.mainOverlay.querySelector('.overlay-filter-input');
+            console.log(`${this.SCRIPT_PREFIX} Main overlay already exists. Re-using (listeners might need re-attaching if this instance is new and old one was not cleaned properly).`);
+            return;
+        }
+
+        this.mainOverlay = document.createElement('div');
+        this.mainOverlay.id = 'wmTransformerOverlay';
+        this.mainOverlay.className = 'wm-transformer-overlay';
+        this.mainOverlay.style.display = 'none';
+
+        const header = document.createElement('div');
+        header.className = 'overlay-header';
+        header.innerHTML = `<span>WorkMarket Enhanced Assignments</span><div class="overlay-controls"><button class="overlay-minimize-btn" title="Minimize">_</button><button class="overlay-maximize-btn" title="Maximize">□</button><button class="overlay-close-btn" title="Hide">X</button></div>`;
+
+        const filterContainer = document.createElement('div');
+        filterContainer.className = 'overlay-filter-container';
+        this.filterInput = document.createElement('input');
+        this.filterInput.type = 'text';
+        this.filterInput.placeholder = 'Filter assignments...';
+        this.filterInput.className = 'overlay-filter-input';
+        filterContainer.appendChild(this.filterInput);
+
+        this.mainOverlayContentTarget = document.createElement('div');
+        this.mainOverlayContentTarget.className = 'overlay-content';
+        this.mainOverlayContentTarget.id = 'assignment_list_results_overlay_content';
+
+        const resizeHandle = document.createElement('div');
+        resizeHandle.className = 'overlay-resize-handle';
+
+        this.mainOverlay.appendChild(header);
+        this.mainOverlay.appendChild(filterContainer);
+        this.mainOverlay.appendChild(this.mainOverlayContentTarget);
+        this.mainOverlay.appendChild(resizeHandle);
+        document.body.appendChild(this.mainOverlay);
+
+        header.addEventListener('mousedown', this.startDragOverlayBound);
+        resizeHandle.addEventListener('mousedown', this.startResizeOverlayBound);
+        header.querySelector('.overlay-minimize-btn').addEventListener('click', () => this.mainOverlay.classList.toggle('minimized'));
+        header.querySelector('.overlay-maximize-btn').addEventListener('click', () => this.toggleMaximizeOverlay());
+        header.querySelector('.overlay-close-btn').addEventListener('click', () => { if(this.mainOverlay) this.mainOverlay.style.display = 'none'; });
+
+        this.filterInput.addEventListener('input', () => {
+            this.filterQuery = this.filterInput.value.toLowerCase();
+            this.renderTable(this.tableData, this.activeTableHeaders, this.mainOverlayContentTarget);
+        });
+
+        console.log(`${this.SCRIPT_PREFIX} Main table overlay created.`);
+    }
     startDragOverlay(e) { if (e.target.classList.contains('overlay-controls') || e.target.closest('.overlay-controls')) return; this.isDraggingOverlay = true; this.mainOverlay.style.userSelect = 'none'; this.overlayDragStartX = e.clientX - this.mainOverlay.offsetLeft; this.overlayDragStartY = e.clientY - this.mainOverlay.offsetTop; document.addEventListener('mousemove', this.doDragOverlayBound); document.addEventListener('mouseup', this.stopDragOverlayBound); }
     doDragOverlay(e) { if (!this.isDraggingOverlay || !this.mainOverlay) return; this.mainOverlay.style.left = (e.clientX - this.overlayDragStartX) + 'px'; this.mainOverlay.style.top = (e.clientY - this.overlayDragStartY) + 'px'; }
     stopDragOverlay() { this.isDraggingOverlay = false; if(this.mainOverlay) this.mainOverlay.style.userSelect = ''; document.removeEventListener('mousemove', this.doDragOverlayBound); document.removeEventListener('mouseup', this.stopDragOverlayBound); }
