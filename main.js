@@ -1,11 +1,10 @@
 (async function() {
     'use strict';
-    const SCRIPT_PREFIX = '[WM TRANSFORMER V15-CSV]';
+    const SCRIPT_PREFIX = '[WM TRANSFORMER V15.FULL]';
     console.log(`${SCRIPT_PREFIX} Script starting...`);
 
-    // --- Global CSS String --- (Same as V14)
+    // --- Global CSS String ---
     const customCss = `
-        /* ... All CSS from V14 ... */
         #assignment_list_results { font-family: Arial, sans-serif; }
         .custom-sortable-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.80em; box-shadow: 0 0 10px rgba(0,0,0,0.1); table-layout: auto; }
         .custom-sortable-table thead tr { background-color: #4A5568; color: #ffffff; text-align: left; }
@@ -79,11 +78,27 @@
         .overall-score-display { font-size: 1.1em; font-weight: bold; color: #17a2b8; margin-bottom: 10px; text-align: center; padding: 5px; background-color: #f8f9fa; border-radius: 4px;}
     `;
 
-    function addStylesOnce(cssString, scriptPrefix) { /* ... same as V12 ... */ }
-    function modifyPageSizeSelectOnce(scriptPrefix) { /* ... same as V12 ... */ }
+    function addStylesOnce(cssString, scriptPrefix) {
+        const styleId = 'customAssignmentsTableStyles_Global';
+        if (document.getElementById(styleId)) { return; }
+        const styleElement = document.createElement('style'); styleElement.id = styleId;
+        styleElement.textContent = cssString; document.head.appendChild(styleElement);
+        console.log(`${scriptPrefix} Global custom styles injected successfully.`);
+    }
+
+    function modifyPageSizeSelectOnce(scriptPrefix) {
+        const pageSizeSelect = document.getElementById('assignment_list_size');
+        if (pageSizeSelect) {
+            console.log(`${scriptPrefix} Modifying #assignment_list_size select.`);
+            const currentSelectedValue = pageSizeSelect.value; pageSizeSelect.innerHTML = ''; let isCurrentSelectedStillAvailable = false;
+            for (let i = 100; i <= 1000; i += 50) { const option = document.createElement('option'); option.value = i; option.textContent = i; if (String(i) === currentSelectedValue) { option.selected = true; isCurrentSelectedStillAvailable = true; } pageSizeSelect.appendChild(option); }
+            if (!isCurrentSelectedStillAvailable && pageSizeSelect.options.length > 0) { /* Potentially select first */ }
+            console.log(`${scriptPrefix} #assignment_list_size select modified.`);
+        } else { console.warn(`${scriptPrefix} Warning: Select element #assignment_list_size not found for modification.`); }
+    }
+
 
 class WorkMarketTransformer {
-    // ... (Constructor and other methods like parseFullDateToParts, parseLocationString, API fetch, score calculation, extract, table rendering, sorting, overlay methods, tech modal methods - ensure these are the full V12/V14 bodies) ...
     constructor() {
         this.SCRIPT_PREFIX = SCRIPT_PREFIX;
         console.log(`${this.SCRIPT_PREFIX} Initializing WorkMarketTransformer class instance...`);
@@ -105,28 +120,137 @@ class WorkMarketTransformer {
         this.overlayIsMaximized = false;
         this.overlayPreMaximizeDimensions = {};
         this.techModalIsDragging = false; this.techModalDragStartX = 0; this.techModalDragStartY = 0;
+
         this.doDragOverlayBound = this.doDragOverlay.bind(this);
         this.stopDragOverlayBound = this.stopDragOverlay.bind(this);
         this.doResizeOverlayBound = this.doResizeOverlay.bind(this);
         this.stopResizeOverlayBound = this.stopResizeOverlay.bind(this);
         this.doDragTechModalBound = this.doDragTechModal.bind(this);
         this.stopDragTechModalBound = this.stopDragTechModal.bind(this);
-        if (!this.originalResultsContainerSource) { console.error(`${this.SCRIPT_PREFIX} CRITICAL ERROR: Source container #assignment_list_results not found. Aborting class initialization.`); return; }
+
+        if (!this.originalResultsContainerSource) {
+            console.error(`${this.SCRIPT_PREFIX} CRITICAL ERROR: Source container #assignment_list_results not found. Aborting class initialization.`);
+            return;
+        }
         this.createMainOverlay();
         this.createTechModal();
         console.log(`${this.SCRIPT_PREFIX} Constructor finished. Setting up content observer/poller...`);
         this.waitForAssignmentsAndInitialize();
     }
+
     parseFullDateToParts(dateString) { if (!dateString) return { date: '', time: '', timezone: '', timestamp: 0 }; const parts = { date: '', time: '', timezone: '', timestamp: 0 }; const match = dateString.match(/(\w{3})\s(\d{1,2})\s(\d{1,2}:\d{2}\s(?:AM|PM))\s*(\w{3})?/); if (match) { parts.date = `${match[1]} ${match[2]}`; parts.time = match[3]; parts.timezone = match[4] || ''; } else { const dateParts = dateString.split(' '); if (dateParts.length >= 2) parts.date = `${dateParts[0]} ${dateParts[1]}`; if (dateParts.length >= 4) parts.time = `${dateParts[2]} ${dateParts[3]}`; } const cleanedDateString = dateString.replace(/\s*(MST|PST|PDT|EST|EDT|CST|CDT|UTC)/, '').trim(); let ts = Date.parse(cleanedDateString); if (isNaN(ts) && match) { const year = new Date().getFullYear(); ts = Date.parse(`${match[1]} ${match[2]}, ${year} ${match[3]}`); } parts.timestamp = isNaN(ts) ? 0 : ts; return parts; }
     parseLocationString(locationString) { if (!locationString) return { city: '', state: '', zip: '' }; const parts = { city: '', state: '', zip: '' }; const regex = /^(.*?),\s*([A-Za-z]{2})\s*([A-Za-z0-9\s-]{3,10})$/; const match = locationString.match(regex); if (match) { parts.city = match[1].trim(); parts.state = match[2].trim().toUpperCase(); parts.zip = match[3].trim().toUpperCase(); } else { const commaParts = locationString.split(','); if (commaParts.length > 0) parts.city = commaParts[0].trim(); if (commaParts.length > 1) { const stateZipPart = commaParts[1].trim(); const spaceParts = stateZipPart.split(/\s+/); if (spaceParts.length > 0 && spaceParts[0].length === 2 && /^[A-Za-z]+$/.test(spaceParts[0])) { parts.state = spaceParts[0].toUpperCase(); if (spaceParts.length > 1) parts.zip = spaceParts.slice(1).join(' '); } else { parts.zip = stateZipPart; } } } return parts; }
-    async fetchWorkerData(assignmentId) { if (!assignmentId) { console.warn(`${this.SCRIPT_PREFIX} No assignment ID for fetching workers.`); return { count: 0, applicantDetailsDisplay: 'No ID', top10TechsFullData: [] }; } const url = `/assignments/${assignmentId}/workers?start=0&limit=50&sortColumn=NEGOTIATION_CREATED_ON&sortDirection=DESC`; let responseText = ''; try { const response = await fetch(url, { headers: { 'Accept': 'application/json, text/plain, */*', 'X-Requested-With': 'XMLHttpRequest' } }); responseText = await response.text(); if (!response.ok) { console.error(`${this.SCRIPT_PREFIX} API Call [ERROR] - Failed for ${assignmentId}: ${response.status} ${response.statusText}. Response Text:`, responseText); return { count: 0, applicantDetailsDisplay: `Error ${response.status}`, top10TechsFullData: [] };} const data = JSON.parse(responseText); let allFetchedWorkers = data.results || []; const totalFetchedInitially = allFetchedWorkers.length; const appliedWorkers = allFetchedWorkers.filter(w => { const isNotDeclined = w.declined_on === ""; const hasActiveNegotiation = w.has_negotiation === true && w.negotiation !== null; const hasApplied = hasActiveNegotiation; return isNotDeclined && hasApplied; }); appliedWorkers.sort((a, b) => (a.distance || Infinity) - (b.distance || Infinity)); const top10WorkersRaw = appliedWorkers.slice(0, 10); const top10TechsFullData = top10WorkersRaw.map(w => { const techWithScore = { ...w, assignmentId: assignmentId }; const scores = this.calculateOverallScore(techWithScore); return { ...techWithScore, ...scores }; }); const listItems = top10WorkersRaw.map((tech, index) => { let displayName = ''; if (tech.company_name && tech.company_name.toLowerCase() === 'sole proprietor') { displayName = tech.name || tech.company_name || 'N/A'; } else { displayName = tech.company_name || 'N/A'; if (tech.name && tech.name.toLowerCase() !== tech.company_name.toLowerCase()) { displayName += ` (${tech.name})`; } } const distance = (tech.distance !== undefined ? parseFloat(tech.distance).toFixed(1) + ' mi' : 'N/A'); const totalCostValue = tech.negotiation?.pricing?.total_cost; const totalCostDisplay = totalCostValue !== undefined ? `$${parseFloat(totalCostValue).toFixed(2)}` : 'N/A'; const costClass = totalCostValue !== undefined ? 'cost-value' : 'cost-na'; return `<li><span class="tech-detail-link" data-assignment-id="${assignmentId}" data-tech-index="${index}">${displayName}</span> (${distance}, <span class="${costClass}">Cost: ${totalCostDisplay}</span>)</li>`; }); const applicantDetailsDisplay = top10TechsFullData.length > 0 ? `<ul>${listItems.join('')}</ul>` : (totalFetchedInitially > 0 ? 'None met filter criteria' : 'No applicants found'); return { count: appliedWorkers.length, applicantDetailsDisplay: applicantDetailsDisplay, top10TechsFullData: top10TechsFullData }; } catch (error) { console.error(`${this.SCRIPT_PREFIX} API Call [EXCEPTION] - Error fetching/parsing worker data for ${assignmentId}:`, error); console.error(`${this.SCRIPT_PREFIX} API Call [EXCEPTION] - Response text was:`, responseText); return { count: 0, applicantDetailsDisplay: 'Fetch/Parse Exception', top10TechsFullData: [] }; } }
-    calculateOverallScore(techData, assignmentBudget = 350) { let CS = 50, DS = 0, SS = 50, OS = 0; const totalCost = techData.negotiation?.pricing?.total_cost; if (totalCost !== undefined && totalCost !== null) { CS = Math.max(0, (1 - (parseFloat(totalCost) / assignmentBudget)) * 100); } const distance = techData.distance; if (distance !== undefined && distance !== null) { if (distance <= 40) { DS = Math.max(0, (1 - (distance / 80)) * 100); } else if (distance <= 60) { DS = 20; } else if (distance <= 80) { DS = 10; } else { DS = 0; } } let CPS_Final = 50; const rscCompany = techData.resource_scorecard_for_company?.values; const rscIndividual = techData.resource_scorecard; if (rscCompany) { const compCompletedNet90 = rscCompany.COMPLETED_WORK?.net90; if (compCompletedNet90 !== undefined && compCompletedNet90 !== null && compCompletedNet90 > 0) { const satNet90 = rscCompany.SATISFACTION_OVER_ALL?.net90 || 0; const onTimeNet90 = rscCompany.ON_TIME_PERCENTAGE?.net90 || 0; const reliabilityNet90Factor = Math.min(1, (compCompletedNet90 || 0) / 5); const negNet90Count = (rscCompany.CANCELLED_WORK?.net90 || 0) + (rscCompany.LATE_WORK?.net90 || 0) + (rscCompany.ABANDONED_WORK?.net90 || 0); CPS_Final = ((satNet90 * 0.45) + (onTimeNet90 * 0.35) + (reliabilityNet90Factor * 0.20) - (negNet90Count * 0.10)) * 100; } else if (rscCompany.COMPLETED_WORK?.all !== undefined && rscCompany.COMPLETED_WORK?.all > 0) { const satAll = rscCompany.SATISFACTION_OVER_ALL?.all || 0; const onTimeAll = rscCompany.ON_TIME_PERCENTAGE?.all || 0; const reliabilityAllFactor = Math.min(1, (rscCompany.COMPLETED_WORK?.all || 0) / 5); const negAllCount = (rscCompany.CANCELLED_WORK?.all || 0) + (rscCompany.LATE_WORK?.all || 0) + (rscCompany.ABANDONED_WORK?.all || 0); const CPS_All_Raw = ((satAll * 0.45) + (onTimeAll * 0.35) + (reliabilityAllFactor * 0.20) - (negAllCount * 0.10)) * 100; CPS_Final = CPS_All_Raw * 0.85; } } let IPS = 50; if (rscIndividual?.rating && rscIndividual?.values) { if (rscIndividual.rating.count > 0) { const satInd = rscIndividual.rating.satisfactionRate || 0; const onTimeInd = rscIndividual.values.ON_TIME_PERCENTAGE?.all || 0; const reliabilityIndFactor = Math.min(1, (rscIndividual.rating.count || 0) / 50); const negIndCount = (rscIndividual.values.CANCELLED_WORK?.all || 0) + (rscIndividual.values.LATE_WORK?.all || 0) + (rscIndividual.values.ABANDONED_WORK?.all || 0); IPS = ((satInd * 0.40) + (onTimeInd * 0.30) + (reliabilityIndFactor * 0.30) - (negIndCount * 0.02)) * 100; } } else if (techData.new_user === true) { IPS = 50; } if (rscCompany?.COMPLETED_WORK?.net90 > 0) { SS = (CPS_Final * 0.80) + (IPS * 0.20); } else if (rscCompany?.COMPLETED_WORK?.all > 0) { SS = (CPS_Final * 0.65) + (IPS * 0.35); } else { SS = IPS; } SS = Math.max(0, Math.min(100, SS)); CPS_Final = Math.max(0, Math.min(100, CPS_Final)); IPS = Math.max(0, Math.min(100, IPS)); CS = Math.max(0, Math.min(100, CS)); DS = Math.max(0, Math.min(100, DS)); OS = (CS * 0.30) + (DS * 0.15) + (SS * 0.55); OS = Math.max(0, Math.min(100, OS)); return { OverallScore: OS.toFixed(2), CostScore: CS.toFixed(2), DistanceScore: DS.toFixed(2), StatsScore: SS.toFixed(2), CPS_Final: CPS_Final.toFixed(2), IPS: IPS.toFixed(2) }; }
-    async extractAssignmentsData(assignmentNodes) { if (assignmentNodes.length === 0) { console.warn(`${this.SCRIPT_PREFIX} extractAssignmentsData received 0 nodes. No data to process.`); return []; } const assignmentsPromises = assignmentNodes.map(async (itemNode, index) => { const data = {}; const getText = (selector, baseNode = itemNode, trim = true) => { const el = baseNode.querySelector(selector); let text = el ? el.textContent : ''; return trim ? text.trim() : text; }; const getAttribute = (selector, attribute, baseNode = itemNode) => { const el = baseNode.querySelector(selector); return el ? el.getAttribute(attribute) : ''; }; data.checkboxValue = getAttribute('.results-select input[type="checkbox"]', 'value'); data.isChecked = itemNode.querySelector('.results-select input[type="checkbox"]')?.checked || false; const titleLinkEl = itemNode.querySelector('div[style="float: left;"] > strong > a'); data.title = titleLinkEl ? titleLinkEl.querySelector('.title').textContent.trim() : 'N/A'; data.detailsLink = titleLinkEl ? titleLinkEl.href : '#'; data.ariaLabel = titleLinkEl ? titleLinkEl.getAttribute('aria-label') : data.title; const statusNode = itemNode.querySelector('.status'); let statusCombined = ''; if (statusNode) { let simpleStatusText = statusNode.textContent.trim().replace(/\n+/g, ' ').replace(/\s+/g, ' '); if (simpleStatusText.length > 0 && simpleStatusText.length < 20 && !statusNode.querySelector('p strong') && !statusNode.querySelector('span.label')) { statusCombined = simpleStatusText; } else { const statusStrongEl = statusNode.querySelector('p strong'); const statusLabelEl = statusNode.querySelector('span.label'); let parts = []; if (statusStrongEl) parts.push(statusStrongEl.textContent.trim()); if (statusLabelEl) parts.push(statusLabelEl.textContent.trim()); statusCombined = parts.join(' - '); } } data.status = statusCombined || 'N/A'; const fullDateString = getText('.date small.meta span'); const dateParts = this.parseFullDateToParts(fullDateString); data.parsedDate = dateParts.date; data.parsedTime = dateParts.time; data.timestamp = dateParts.timestamp; const fullLocationString = getText('.location small.meta').replace(/\s+/g, ' '); const locationParts = this.parseLocationString(fullLocationString); data.city = locationParts.city; data.state = locationParts.state; data.zip = locationParts.zip; data.price = getText('.price small.meta'); data.priceNumeric = parseFloat(String(data.price).replace(/[^0-9.-]+/g, "")) || 0; data.siteName = ''; data.graniteTicket = ''; const workDetailsMetas = Array.from(itemNode.querySelectorAll('.work-details > small.meta')); workDetailsMetas.forEach(metaEl => { const text = metaEl.textContent.trim(); if (text.startsWith('Location:')) data.siteName = text.substring('Location:'.length).trim(); else if (text.startsWith('Granite Ticket Number:')) data.graniteTicket = text.substring('Granite Ticket Number:'.length).trim(); }); const labelNodes = Array.from(itemNode.querySelectorAll('.assignment_labels .label')); data.labels = labelNodes.map(ln => ln.textContent.trim()).join(', '); if (!data.labels) data.labels = ''; const assignIdHiddenEl = itemNode.querySelector('.assignmentId'); if (assignIdHiddenEl && assignIdHiddenEl.id) { data.assignmentId = assignIdHiddenEl.id; } else { const assignIdMetaText = getText('ul.assignment-actions li.fr em'); const matchId = assignIdMetaText.match(/Assign\. ID: (\d+)/); data.assignmentId = matchId ? matchId[1] : (data.checkboxValue || null); } const updatedInfoText = getText('ul.assignment-actions li.fr em'); if (updatedInfoText) { data.lastUpdateText = updatedInfoText.split('|')[0].trim(); if (data.lastUpdateText.toLowerCase().includes('wolfanger')) { data.lastUpdateText = ''; } } else { data.lastUpdateText = ''; } data.appliedCount = '...'; data.applicantDetailsDisplay = 'Loading...'; if (data.assignmentId) { const workerInfo = await this.fetchWorkerData(data.assignmentId); data.appliedCount = workerInfo.count; data.applicantDetailsDisplay = workerInfo.applicantDetailsDisplay; this.currentAssignmentTechsData[data.assignmentId] = workerInfo.top10TechsFullData; } else { console.warn(`${this.SCRIPT_PREFIX} Assignment item ${index + 1} (Title: ${data.title.substring(0,30)}...) has no ID.`); data.appliedCount = 0; data.applicantDetailsDisplay = 'No ID'; this.currentAssignmentTechsData[data.assignmentId || `no_id_${index}`] = []; } return data; }); return Promise.all(assignmentsPromises); }
-    renderTable(dataToRender, headersToRender, targetContainer) { if (!targetContainer) { console.error(`${this.SCRIPT_PREFIX} renderTable: Target container for table is not defined.`); return; } targetContainer.innerHTML = ''; const table = document.createElement('table'); table.id = 'customAssignmentsTable_overlay'; table.className = 'custom-sortable-table'; const thead = table.createTHead(); const headerRow = thead.insertRow(); headersToRender.forEach(headerInfo => { const th = document.createElement('th'); th.className = headerInfo.className || ''; if (headerInfo.sortable) { th.dataset.column = headerInfo.key; th.dataset.type = headerInfo.type; th.dataset.sortKey = headerInfo.sortKey || headerInfo.key; th.innerHTML = `${headerInfo.name} <span class="sort-arrow"></span>`; th.addEventListener('click', () => this.handleSort(headerInfo.key)); } else { th.textContent = headerInfo.name; } headerRow.appendChild(th); }); const tbody = table.createTBody(); if (dataToRender.length === 0) { const row = tbody.insertRow(); const cell = row.insertCell(); cell.colSpan = headersToRender.length; cell.textContent = "No assignments found or processed."; cell.style.textAlign = "center"; cell.style.padding = "20px"; } else { dataToRender.forEach((item) => { const row = tbody.insertRow(); headersToRender.forEach(headerInfo => { const cell = row.insertCell(); cell.className = headerInfo.className || ''; if (item.applicantDetailsDisplay === 'Loading...' && (headerInfo.key === 'applicantDetailsDisplay' || headerInfo.key === 'appliedCount')) { cell.classList.add('loading-workers'); } if (headerInfo.key === 'checkbox') { const chk = document.createElement('input'); chk.type = 'checkbox'; chk.value = item.checkboxValue; chk.checked = item.isChecked; chk.name = "work_ids[]"; chk.id = `work_id_inj_overlay_${item.checkboxValue}`; cell.appendChild(chk); } else if (headerInfo.key === 'title') { const link = document.createElement('a'); link.href = item.detailsLink; link.textContent = item.title; link.setAttribute('aria-label', item.ariaLabel || item.title); link.className = 'tooltipped tooltipped-n'; cell.appendChild(link); } else if (headerInfo.key === 'applicantDetailsDisplay') { cell.innerHTML = item[headerInfo.key] || ''; cell.querySelectorAll('.tech-detail-link').forEach(link => { link.addEventListener('click', (e) => { e.preventDefault(); const assignmentId = e.target.dataset.assignmentId; const techIndex = parseInt(e.target.dataset.techIndex, 10); if (this.currentAssignmentTechsData[assignmentId] && this.currentAssignmentTechsData[assignmentId][techIndex] !== undefined) { this.showTechDetailsModal(this.currentAssignmentTechsData[assignmentId][techIndex], assignmentId, techIndex); } else { console.error('Tech data not found for modal:', assignmentId, techIndex, this.currentAssignmentTechsData); alert('Error: Detailed tech data not found.'); } }); }); } else { cell.textContent = item[headerInfo.key] !== undefined ? String(item[headerInfo.key]) : ''; } }); }); } targetContainer.appendChild(table); this.updateSortIndicators(); }
-    handleSort(columnKey) { const header = this.activeTableHeaders.find(h => h.key === columnKey); if (!header || !header.sortable) return; if (this.tableData.some(item => item.applicantDetailsDisplay === 'Loading...') && (columnKey === 'applicantDetailsDisplay' || columnKey === 'appliedCount')) { console.log(`${this.SCRIPT_PREFIX} Worker data still loading, please wait to sort these columns.`); return; } if (this.currentSort.column === columnKey) { this.currentSort.direction = this.currentSort.direction === 'asc' ? 'desc' : 'asc'; } else { this.currentSort.column = columnKey; this.currentSort.direction = 'asc'; } this.sortData(); if (this.mainOverlayContentTarget) { this.renderTable(this.tableData, this.activeTableHeaders, this.mainOverlayContentTarget); } }
-    sortData() { const { column, direction } = this.currentSort; const header = this.activeTableHeaders.find(h => h.key === column); if (!header || !header.sortable) return; const sortKey = header.sortKey || column; this.tableData.sort((a, b) => { let valA = a[sortKey]; let valB = b[sortKey]; if (sortKey === 'applicantDetailsDisplay' || sortKey === 'appliedCount') { const errorOrLoadingValues = ['error', 'fetch error', 'no id', 'loading...', '...']; if (sortKey === 'appliedCount') { if (typeof valA === 'string' && errorOrLoadingValues.includes(String(valA).toLowerCase())) { } else valA = Number(valA); if (typeof valB === 'string' && errorOrLoadingValues.includes(String(valB).toLowerCase())) { } else valB = Number(valB); } const isValALoadingError = typeof valA === 'string' && errorOrLoadingValues.includes(valA.toLowerCase()); const isValBLoadingError = typeof valB === 'string' && errorOrLoadingValues.includes(valB.toLowerCase()); if (isValALoadingError && !isValBLoadingError) return direction === 'asc' ? 1 : -1; if (!isValALoadingError && isValBLoadingError) return direction === 'asc' ? -1 : 1; if (isValALoadingError && isValBLoadingError) { valA = String(valA || '').toLowerCase(); valB = String(valB || '').toLowerCase(); } } if (typeof valA === 'string' && sortKey !== 'timestamp' && !(typeof valA === 'number')) valA = (valA || '').toLowerCase(); if (typeof valB === 'string' && sortKey !== 'timestamp' && !(typeof valB === 'number')) valB = (valB || '').toLowerCase(); if (valA < valB) return direction === 'asc' ? -1 : 1; if (valA > valB) return direction === 'asc' ? 1 : -1; return 0; }); }
-    updateSortIndicators() { const table = document.getElementById('customAssignmentsTable_overlay'); if (!table) return; table.querySelectorAll('thead th .sort-arrow').forEach(arrow => arrow.className = 'sort-arrow'); const activeHeaderInfo = this.activeTableHeaders.find(h => h.key === this.currentSort.column); if (activeHeaderInfo && activeHeaderInfo.sortable) { const activeThArrow = table.querySelector(`thead th[data-column="${this.currentSort.column}"] .sort-arrow`); if (activeThArrow) activeThArrow.classList.add(this.currentSort.direction); } }
-    createMainOverlay() { if (document.getElementById('wmTransformerOverlay')) { this.mainOverlay = document.getElementById('wmTransformerOverlay'); this.mainOverlayContentTarget = this.mainOverlay.querySelector('.overlay-content'); /* console.log(`${this.SCRIPT_PREFIX} Main overlay already exists. Re-using.`); */ return; } this.mainOverlay = document.createElement('div'); this.mainOverlay.id = 'wmTransformerOverlay'; this.mainOverlay.className = 'wm-transformer-overlay'; this.mainOverlay.style.display = 'none'; const header = document.createElement('div'); header.className = 'overlay-header'; header.innerHTML = `<span>WorkMarket Enhanced Assignments</span><div class="overlay-controls"><button class="download-csv-btn" title="Download CSV">📥 CSV</button><button class="overlay-minimize-btn" title="Minimize">_</button><button class="overlay-maximize-btn" title="Maximize">□</button><button class="overlay-close-btn" title="Hide">X</button></div>`; this.mainOverlayContentTarget = document.createElement('div'); this.mainOverlayContentTarget.className = 'overlay-content'; this.mainOverlayContentTarget.id = 'assignment_list_results_overlay_content'; const resizeHandle = document.createElement('div'); resizeHandle.className = 'overlay-resize-handle'; this.mainOverlay.appendChild(header); this.mainOverlay.appendChild(this.mainOverlayContentTarget); this.mainOverlay.appendChild(resizeHandle); document.body.appendChild(this.mainOverlay); header.addEventListener('mousedown', this.startDragOverlayBound); resizeHandle.addEventListener('mousedown', this.startResizeOverlayBound); header.querySelector('.download-csv-btn').addEventListener('click', () => this.exportDataToCsv()); header.querySelector('.overlay-minimize-btn').addEventListener('click', () => this.mainOverlay.classList.toggle('minimized')); header.querySelector('.overlay-maximize-btn').addEventListener('click', () => this.toggleMaximizeOverlay()); header.querySelector('.overlay-close-btn').addEventListener('click', () => { if(this.mainOverlay) this.mainOverlay.style.display = 'none'; }); console.log(`${this.SCRIPT_PREFIX} Main table overlay created.`); }
+
+    async fetchWorkerData(assignmentId) {
+        if (!assignmentId) { console.warn(`${this.SCRIPT_PREFIX} No assignment ID for fetching workers.`); return { count: 0, applicantDetailsDisplay: 'No ID', top10TechsFullData: [] }; }
+        const url = `/assignments/${assignmentId}/workers?start=0&limit=50&sortColumn=NEGOTIATION_CREATED_ON&sortDirection=DESC`;
+        let responseText = '';
+        try {
+            const response = await fetch(url, { headers: { 'Accept': 'application/json, text/plain, */*', 'X-Requested-With': 'XMLHttpRequest' } });
+            responseText = await response.text();
+            if (!response.ok) { console.error(`${this.SCRIPT_PREFIX} API Call [ERROR] - Failed for ${assignmentId}: ${response.status} ${response.statusText}. Response Text:`, responseText); return { count: 0, applicantDetailsDisplay: `Error ${response.status}`, top10TechsFullData: [] };}
+            const data = JSON.parse(responseText);
+
+            let allFetchedWorkers = data.results || [];
+            const totalFetchedInitially = allFetchedWorkers.length;
+
+            const appliedWorkers = allFetchedWorkers.filter(w => {
+                const isNotDeclined = w.declined_on === "";
+                // Based on your sample JSON, `status: "open"` (invitation status) AND
+                // `has_negotiation: true` (they've interacted) indicates an active applicant.
+                const hasActiveEngagement = w.has_negotiation === true && w.negotiation !== null && w.status === "open";
+                return isNotDeclined && hasActiveEngagement;
+            });
+
+            appliedWorkers.sort((a, b) => (a.distance || Infinity) - (b.distance || Infinity));
+            const top10WorkersRaw = appliedWorkers.slice(0, 10);
+
+            const top10TechsFullData = top10WorkersRaw.map(w => {
+                const techWithScore = { ...w, assignmentId: assignmentId }; // Pass assignmentId for context
+                const scores = this.calculateOverallScore(techWithScore);
+                return { ...techWithScore, ...scores };
+            });
+
+            const listItems = top10WorkersRaw.map((tech, index) => {
+                let displayName = '';
+                if (tech.company_name && tech.company_name.toLowerCase() === 'sole proprietor') {
+                    displayName = tech.name || tech.company_name || 'N/A';
+                } else {
+                    displayName = tech.company_name || 'N/A';
+                    if (tech.name && tech.name.toLowerCase() !== tech.company_name.toLowerCase()) {
+                        displayName += ` (${tech.name})`;
+                    }
+                }
+                const distance = (tech.distance !== undefined ? parseFloat(tech.distance).toFixed(1) + ' mi' : 'N/A');
+                const totalCostValue = tech.negotiation?.pricing?.total_cost;
+                const totalCostDisplay = totalCostValue !== undefined ? `$${parseFloat(totalCostValue).toFixed(2)}` : 'N/A';
+                const costClass = totalCostValue !== undefined ? 'cost-value' : 'cost-na';
+                return `<li><span class="tech-detail-link" data-assignment-id="${assignmentId}" data-tech-index="${index}">${displayName}</span> (${distance}, <span class="${costClass}">Cost: ${totalCostDisplay}</span>)</li>`;
+            });
+            const applicantDetailsDisplay = top10TechsFullData.length > 0 ? `<ul>${listItems.join('')}</ul>` : (totalFetchedInitially > 0 ? 'None met filter criteria' : 'No applicants found');
+            return { count: appliedWorkers.length, applicantDetailsDisplay: applicantDetailsDisplay, top10TechsFullData: top10TechsFullData };
+        } catch (error) { console.error(`${this.SCRIPT_PREFIX} API Call [EXCEPTION] - Error fetching/parsing worker data for ${assignmentId}:`, error); console.error(`${this.SCRIPT_PREFIX} API Call [EXCEPTION] - Response text was:`, responseText); return { count: 0, applicantDetailsDisplay: 'Fetch/Parse Exception', top10TechsFullData: [] }; }
+    }
+
+    calculateOverallScore(techData, assignmentBudget = 350) {
+        let CS = 50, DS = 0, SS = 50, OS = 0;
+        const totalCost = techData.negotiation?.pricing?.total_cost;
+        if (totalCost !== undefined && totalCost !== null) { CS = Math.max(0, (1 - (parseFloat(totalCost) / assignmentBudget)) * 100); }
+        const distance = techData.distance;
+        if (distance !== undefined && distance !== null) { if (distance <= 40) { DS = Math.max(0, (1 - (distance / 80)) * 100); } else if (distance <= 60) { DS = 20; } else if (distance <= 80) { DS = 10; } else { DS = 0; } }
+        let CPS_Final = 50; const rscCompany = techData.resource_scorecard_for_company?.values; const rscIndividual = techData.resource_scorecard;
+        if (rscCompany) { const compCompletedNet90 = rscCompany.COMPLETED_WORK?.net90; if (compCompletedNet90 !== undefined && compCompletedNet90 !== null && compCompletedNet90 > 0) { const satNet90 = rscCompany.SATISFACTION_OVER_ALL?.net90 || 0; const onTimeNet90 = rscCompany.ON_TIME_PERCENTAGE?.net90 || 0; const reliabilityNet90Factor = Math.min(1, (compCompletedNet90 || 0) / 5); const negNet90Count = (rscCompany.CANCELLED_WORK?.net90 || 0) + (rscCompany.LATE_WORK?.net90 || 0) + (rscCompany.ABANDONED_WORK?.net90 || 0); CPS_Final = ((satNet90 * 0.45) + (onTimeNet90 * 0.35) + (reliabilityNet90Factor * 0.20) - (negNet90Count * 0.10)) * 100; } else if (rscCompany.COMPLETED_WORK?.all !== undefined && rscCompany.COMPLETED_WORK?.all > 0) { const satAll = rscCompany.SATISFACTION_OVER_ALL?.all || 0; const onTimeAll = rscCompany.ON_TIME_PERCENTAGE?.all || 0; const reliabilityAllFactor = Math.min(1, (rscCompany.COMPLETED_WORK?.all || 0) / 5); const negAllCount = (rscCompany.CANCELLED_WORK?.all || 0) + (rscCompany.LATE_WORK?.all || 0) + (rscCompany.ABANDONED_WORK?.all || 0); const CPS_All_Raw = ((satAll * 0.45) + (onTimeAll * 0.35) + (reliabilityAllFactor * 0.20) - (negAllCount * 0.10)) * 100; CPS_Final = CPS_All_Raw * 0.85; } }
+        let IPS = 50; if (rscIndividual?.rating && rscIndividual?.values) { if (rscIndividual.rating.count > 0) { const satInd = rscIndividual.rating.satisfactionRate || 0; const onTimeInd = rscIndividual.values.ON_TIME_PERCENTAGE?.all || 0; const reliabilityIndFactor = Math.min(1, (rscIndividual.rating.count || 0) / 50); const negIndCount = (rscIndividual.values.CANCELLED_WORK?.all || 0) + (rscIndividual.values.LATE_WORK?.all || 0) + (rscIndividual.values.ABANDONED_WORK?.all || 0); IPS = ((satInd * 0.40) + (onTimeInd * 0.30) + (reliabilityIndFactor * 0.30) - (negIndCount * 0.02)) * 100; } } else if (techData.new_user === true) { IPS = 50; }
+        if (rscCompany?.COMPLETED_WORK?.net90 > 0) { SS = (CPS_Final * 0.80) + (IPS * 0.20); } else if (rscCompany?.COMPLETED_WORK?.all > 0) { SS = (CPS_Final * 0.65) + (IPS * 0.35); } else { SS = IPS; }
+        SS = Math.max(0, Math.min(100, SS)); CPS_Final = Math.max(0, Math.min(100, CPS_Final)); IPS = Math.max(0, Math.min(100, IPS)); CS = Math.max(0, Math.min(100, CS)); DS = Math.max(0, Math.min(100, DS));
+        OS = (CS * 0.30) + (DS * 0.15) + (SS * 0.55); OS = Math.max(0, Math.min(100, OS));
+        return { OverallScore: OS.toFixed(2), CostScore: CS.toFixed(2), DistanceScore: DS.toFixed(2), StatsScore: SS.toFixed(2), CPS_Final: CPS_Final.toFixed(2), IPS: IPS.toFixed(2) };
+    }
+
+    async extractAssignmentsData(assignmentNodes) {
+        if (assignmentNodes.length === 0) { console.warn(`${this.SCRIPT_PREFIX} extractAssignmentsData received 0 nodes. No data to process.`); return []; }
+        const assignmentsPromises = assignmentNodes.map(async (itemNode, index) => {
+            const data = {}; const getText = (selector, baseNode = itemNode, trim = true) => { const el = baseNode.querySelector(selector); let text = el ? el.textContent : ''; return trim ? text.trim() : text; }; const getAttribute = (selector, attribute, baseNode = itemNode) => { const el = baseNode.querySelector(selector); return el ? el.getAttribute(attribute) : ''; };
+            data.checkboxValue = getAttribute('.results-select input[type="checkbox"]', 'value'); data.isChecked = itemNode.querySelector('.results-select input[type="checkbox"]')?.checked || false;
+            const titleLinkEl = itemNode.querySelector('div[style="float: left;"] > strong > a'); data.title = titleLinkEl ? titleLinkEl.querySelector('.title').textContent.trim() : 'N/A'; data.detailsLink = titleLinkEl ? titleLinkEl.href : '#';  data.ariaLabel = titleLinkEl ? titleLinkEl.getAttribute('aria-label') : data.title;
+            const statusNode = itemNode.querySelector('.status'); let statusCombined = ''; if (statusNode) { let simpleStatusText = statusNode.textContent.trim().replace(/\n+/g, ' ').replace(/\s+/g, ' '); if (simpleStatusText.length > 0 && simpleStatusText.length < 20 && !statusNode.querySelector('p strong') && !statusNode.querySelector('span.label')) { statusCombined = simpleStatusText; } else { const statusStrongEl = statusNode.querySelector('p strong'); const statusLabelEl = statusNode.querySelector('span.label'); let parts = []; if (statusStrongEl) parts.push(statusStrongEl.textContent.trim()); if (statusLabelEl) parts.push(statusLabelEl.textContent.trim()); statusCombined = parts.join(' - '); } } data.status = statusCombined || 'N/A';
+            const fullDateString = getText('.date small.meta span'); const dateParts = this.parseFullDateToParts(fullDateString); data.parsedDate = dateParts.date; data.parsedTime = dateParts.time; data.timestamp = dateParts.timestamp;
+            const fullLocationString = getText('.location small.meta').replace(/\s+/g, ' '); const locationParts = this.parseLocationString(fullLocationString); data.city = locationParts.city; data.state = locationParts.state; data.zip = locationParts.zip;
+            data.price = getText('.price small.meta'); data.priceNumeric = parseFloat(String(data.price).replace(/[^0-9.-]+/g, "")) || 0;
+            data.siteName = ''; data.graniteTicket = ''; const workDetailsMetas = Array.from(itemNode.querySelectorAll('.work-details > small.meta')); workDetailsMetas.forEach(metaEl => { const text = metaEl.textContent.trim(); if (text.startsWith('Location:')) data.siteName = text.substring('Location:'.length).trim(); else if (text.startsWith('Granite Ticket Number:')) data.graniteTicket = text.substring('Granite Ticket Number:'.length).trim(); });
+            const labelNodes = Array.from(itemNode.querySelectorAll('.assignment_labels .label')); data.labels = labelNodes.map(ln => ln.textContent.trim()).join(', '); if (!data.labels) data.labels = '';
+            const assignIdHiddenEl = itemNode.querySelector('.assignmentId'); if (assignIdHiddenEl && assignIdHiddenEl.id) { data.assignmentId = assignIdHiddenEl.id; } else { const assignIdMetaText = getText('ul.assignment-actions li.fr em'); const matchId = assignIdMetaText.match(/Assign\. ID: (\d+)/); data.assignmentId = matchId ? matchId[1] : (data.checkboxValue || null); }
+            const updatedInfoText = getText('ul.assignment-actions li.fr em'); if (updatedInfoText) { data.lastUpdateText = updatedInfoText.split('|')[0].trim(); if (data.lastUpdateText.toLowerCase().includes('wolfanger')) { data.lastUpdateText = ''; } } else { data.lastUpdateText = ''; }
+            data.appliedCount = '...'; data.applicantDetailsDisplay = 'Loading...';
+            if (data.assignmentId) { const workerInfo = await this.fetchWorkerData(data.assignmentId); data.appliedCount = workerInfo.count; data.applicantDetailsDisplay = workerInfo.applicantDetailsDisplay; this.currentAssignmentTechsData[data.assignmentId] = workerInfo.top10TechsFullData; }
+            else { console.warn(`${this.SCRIPT_PREFIX} Assignment item ${index + 1} (Title: ${data.title.substring(0,30)}...) has no ID.`); data.appliedCount = 0; data.applicantDetailsDisplay = 'No ID'; this.currentAssignmentTechsData[data.assignmentId || `no_id_${index}`] = []; }
+            return data;
+        });
+        return Promise.all(assignmentsPromises);
+    }
+
+    renderTable(dataToRender, headersToRender, targetContainer) {
+        if (!targetContainer) { console.error(`${this.SCRIPT_PREFIX} renderTable: Target container for table is not defined.`); return; }
+        targetContainer.innerHTML = ''; const table = document.createElement('table'); table.id = 'customAssignmentsTable_overlay'; table.className = 'custom-sortable-table'; const thead = table.createTHead(); const headerRow = thead.insertRow(); headersToRender.forEach(headerInfo => { const th = document.createElement('th'); th.className = headerInfo.className || ''; if (headerInfo.sortable) { th.dataset.column = headerInfo.key; th.dataset.type = headerInfo.type; th.dataset.sortKey = headerInfo.sortKey || headerInfo.key; th.innerHTML = `${headerInfo.name} <span class="sort-arrow"></span>`; th.addEventListener('click', () => this.handleSort(headerInfo.key)); } else { th.textContent = headerInfo.name; } headerRow.appendChild(th); }); const tbody = table.createTBody(); if (dataToRender.length === 0) { const row = tbody.insertRow(); const cell = row.insertCell(); cell.colSpan = headersToRender.length; cell.textContent = "No assignments found or processed."; cell.style.textAlign = "center"; cell.style.padding = "20px"; } else { dataToRender.forEach((item) => { const row = tbody.insertRow(); headersToRender.forEach(headerInfo => { const cell = row.insertCell(); cell.className = headerInfo.className || ''; if (item.applicantDetailsDisplay === 'Loading...' && (headerInfo.key === 'applicantDetailsDisplay' || headerInfo.key === 'appliedCount')) { cell.classList.add('loading-workers'); } if (headerInfo.key === 'checkbox') { const chk = document.createElement('input'); chk.type = 'checkbox'; chk.value = item.checkboxValue; chk.checked = item.isChecked; chk.name = "work_ids[]"; chk.id = `work_id_inj_overlay_${item.checkboxValue}`; cell.appendChild(chk); } else if (headerInfo.key === 'title') { const link = document.createElement('a'); link.href = item.detailsLink; link.textContent = item.title; link.setAttribute('aria-label', item.ariaLabel || item.title); link.className = 'tooltipped tooltipped-n'; cell.appendChild(link); } else if (headerInfo.key === 'applicantDetailsDisplay') { cell.innerHTML = item[headerInfo.key] || ''; cell.querySelectorAll('.tech-detail-link').forEach(link => { link.addEventListener('click', (e) => { e.preventDefault(); const assignmentId = e.target.dataset.assignmentId; const techIndex = parseInt(e.target.dataset.techIndex, 10); if (this.currentAssignmentTechsData[assignmentId] && this.currentAssignmentTechsData[assignmentId][techIndex] !== undefined) { this.showTechDetailsModal(this.currentAssignmentTechsData[assignmentId][techIndex], assignmentId, techIndex); } else { console.error('Tech data not found for modal:', assignmentId, techIndex, this.currentAssignmentTechsData); alert('Error: Detailed tech data not found.'); } }); }); } else { cell.textContent = item[headerInfo.key] !== undefined ? String(item[headerInfo.key]) : ''; } }); }); } targetContainer.appendChild(table); this.updateSortIndicators();
+    }
+
+    handleSort(columnKey) {
+        const header = this.activeTableHeaders.find(h => h.key === columnKey); if (!header || !header.sortable) return;
+        if (this.tableData.some(item => item.applicantDetailsDisplay === 'Loading...') && (columnKey === 'applicantDetailsDisplay' || columnKey === 'appliedCount')) { console.log(`${this.SCRIPT_PREFIX} Worker data still loading, please wait to sort these columns.`); return; }
+        if (this.currentSort.column === columnKey) { this.currentSort.direction = this.currentSort.direction === 'asc' ? 'desc' : 'asc'; } else { this.currentSort.column = columnKey; this.currentSort.direction = 'asc'; }
+        this.sortData(); if (this.mainOverlayContentTarget) { this.renderTable(this.tableData, this.activeTableHeaders, this.mainOverlayContentTarget); }
+    }
+
+    sortData() {
+        const { column, direction } = this.currentSort; const header = this.activeTableHeaders.find(h => h.key === column); if (!header || !header.sortable) return; const sortKey = header.sortKey || column;
+        this.tableData.sort((a, b) => { let valA = a[sortKey]; let valB = b[sortKey]; if (sortKey === 'applicantDetailsDisplay' || sortKey === 'appliedCount') { const errorOrLoadingValues = ['error', 'fetch error', 'no id', 'loading...', '...']; if (sortKey === 'appliedCount') { if (typeof valA === 'string' && errorOrLoadingValues.includes(String(valA).toLowerCase())) { } else valA = Number(valA); if (typeof valB === 'string' && errorOrLoadingValues.includes(String(valB).toLowerCase())) { } else valB = Number(valB); } const isValALoadingError = typeof valA === 'string' && errorOrLoadingValues.includes(valA.toLowerCase()); const isValBLoadingError = typeof valB === 'string' && errorOrLoadingValues.includes(valB.toLowerCase()); if (isValALoadingError && !isValBLoadingError) return direction === 'asc' ? 1 : -1; if (!isValALoadingError && isValBLoadingError) return direction === 'asc' ? -1 : 1; if (isValALoadingError && isValBLoadingError) { valA = String(valA || '').toLowerCase(); valB = String(valB || '').toLowerCase(); } } if (typeof valA === 'string' && sortKey !== 'timestamp' && !(typeof valA === 'number')) valA = (valA || '').toLowerCase(); if (typeof valB === 'string' && sortKey !== 'timestamp' && !(typeof valB === 'number')) valB = (valB || '').toLowerCase(); if (valA < valB) return direction === 'asc' ? -1 : 1; if (valA > valB) return direction === 'asc' ? 1 : -1; return 0; });
+    }
+
+    updateSortIndicators() {
+        const table = document.getElementById('customAssignmentsTable_overlay'); if (!table) return; table.querySelectorAll('thead th .sort-arrow').forEach(arrow => arrow.className = 'sort-arrow'); const activeHeaderInfo = this.activeTableHeaders.find(h => h.key === this.currentSort.column); if (activeHeaderInfo && activeHeaderInfo.sortable) { const activeThArrow = table.querySelector(`thead th[data-column="${this.currentSort.column}"] .sort-arrow`); if (activeThArrow) activeThArrow.classList.add(this.currentSort.direction); }
+    }
+
+    createMainOverlay() { if (document.getElementById('wmTransformerOverlay')) { this.mainOverlay = document.getElementById('wmTransformerOverlay'); this.mainOverlayContentTarget = this.mainOverlay.querySelector('.overlay-content'); return; } this.mainOverlay = document.createElement('div'); this.mainOverlay.id = 'wmTransformerOverlay'; this.mainOverlay.className = 'wm-transformer-overlay'; this.mainOverlay.style.display = 'none'; const header = document.createElement('div'); header.className = 'overlay-header'; header.innerHTML = `<span>WorkMarket Enhanced Assignments</span><div class="overlay-controls"><button class="download-csv-btn" title="Download CSV">📥 CSV</button><button class="overlay-minimize-btn" title="Minimize">_</button><button class="overlay-maximize-btn" title="Maximize">□</button><button class="overlay-close-btn" title="Hide">X</button></div>`; this.mainOverlayContentTarget = document.createElement('div'); this.mainOverlayContentTarget.className = 'overlay-content'; this.mainOverlayContentTarget.id = 'assignment_list_results_overlay_content'; const resizeHandle = document.createElement('div'); resizeHandle.className = 'overlay-resize-handle'; this.mainOverlay.appendChild(header); this.mainOverlay.appendChild(this.mainOverlayContentTarget); this.mainOverlay.appendChild(resizeHandle); document.body.appendChild(this.mainOverlay); header.addEventListener('mousedown', this.startDragOverlayBound); resizeHandle.addEventListener('mousedown', this.startResizeOverlayBound); header.querySelector('.download-csv-btn').addEventListener('click', () => this.exportDataToCsv()); header.querySelector('.overlay-minimize-btn').addEventListener('click', () => this.mainOverlay.classList.toggle('minimized')); header.querySelector('.overlay-maximize-btn').addEventListener('click', () => this.toggleMaximizeOverlay()); header.querySelector('.overlay-close-btn').addEventListener('click', () => { if(this.mainOverlay) this.mainOverlay.style.display = 'none'; }); }
     startDragOverlay(e) { if (e.target.classList.contains('overlay-controls') || e.target.closest('.overlay-controls')) return; this.isDraggingOverlay = true; this.mainOverlay.style.userSelect = 'none'; this.overlayDragStartX = e.clientX - this.mainOverlay.offsetLeft; this.overlayDragStartY = e.clientY - this.mainOverlay.offsetTop; document.addEventListener('mousemove', this.doDragOverlayBound); document.addEventListener('mouseup', this.stopDragOverlayBound); }
     doDragOverlay(e) { if (!this.isDraggingOverlay || !this.mainOverlay) return; this.mainOverlay.style.left = (e.clientX - this.overlayDragStartX) + 'px'; this.mainOverlay.style.top = (e.clientY - this.overlayDragStartY) + 'px'; }
     stopDragOverlay() { this.isDraggingOverlay = false; if(this.mainOverlay) this.mainOverlay.style.userSelect = ''; document.removeEventListener('mousemove', this.doDragOverlayBound); document.removeEventListener('mouseup', this.stopDragOverlayBound); }
@@ -134,7 +258,33 @@ class WorkMarketTransformer {
     doResizeOverlay(e) { if (!this.isResizingOverlay || !this.mainOverlay) return; const newWidth = this.overlayOriginalWidth + (e.clientX - this.overlayDragStartX); const newHeight = this.overlayOriginalHeight + (e.clientY - this.overlayDragStartY); this.mainOverlay.style.width = Math.max(300, newWidth) + 'px'; this.mainOverlay.style.height = Math.max(150, newHeight) + 'px'; }
     stopResizeOverlay() { this.isResizingOverlay = false; if(this.mainOverlay) this.mainOverlay.style.userSelect = ''; document.removeEventListener('mousemove', this.doResizeOverlayBound); document.removeEventListener('mouseup', this.stopResizeOverlayBound); }
     toggleMaximizeOverlay() { if (!this.mainOverlay) return; if (this.mainOverlay.classList.contains('maximized-true')) { this.mainOverlay.classList.remove('maximized-true'); this.mainOverlay.style.width = this.overlayPreMaximizeDimensions.width || '98%'; this.mainOverlay.style.height = this.overlayPreMaximizeDimensions.height || 'calc(100vh - 40px)'; this.mainOverlay.style.top = this.overlayPreMaximizeDimensions.top || '20px'; this.mainOverlay.style.left = this.overlayPreMaximizeDimensions.left || '1%'; this.overlayIsMaximized = false; } else { this.overlayPreMaximizeDimensions = { width: this.mainOverlay.style.width, height: this.mainOverlay.style.height, top: this.mainOverlay.style.top, left: this.mainOverlay.style.left, }; this.mainOverlay.classList.add('maximized-true'); this.overlayIsMaximized = true; } }
-    createTechModal() { if (document.getElementById('techDetailModalOverlay')) return; const overlay = document.createElement('div'); overlay.id = 'techDetailModalOverlay'; overlay.className = 'tech-modal-overlay'; overlay.addEventListener('click', (e) => { if (e.target === overlay) this.closeModal(); }); const modalContent = document.createElement('div'); modalContent.className = 'tech-modal-content'; modalContent.innerHTML = ` <div class="tech-modal-header" id="techModalHeader"> <h3>Technician / Company Details</h3> <button type="button" class="tech-modal-close" aria-label="Close">×</button> </div> <div class="tech-modal-body"> <div class="tech-modal-assignment-link"></div> <div id="techModalScoreDisplay" class="overall-score-display" style="display:none;"></div> <div id="techModalDetailsGrid" class="tech-modal-detail-grid"></div> </div> <div class="tech-modal-footer"> <button id="prevTechBtn" class="tech-modal-nav-btn">« Previous</button> <span id="techCounter" style="margin: 0 10px;"></span> <button id="nextTechBtn" class="tech-modal-nav-btn">Next »</button> </div> `; overlay.appendChild(modalContent); document.body.appendChild(overlay); modalContent.querySelector('.tech-modal-header').addEventListener('mousedown', this.startDragTechModalBound); overlay.querySelector('.tech-modal-close').addEventListener('click', () => this.closeModal()); overlay.querySelector('#prevTechBtn').addEventListener('click', () => this.showPrevTech()); overlay.querySelector('#nextTechBtn').addEventListener('click', () => this.showNextTech()); }
+
+    createTechModal() {
+        if (document.getElementById('techDetailModalOverlay')) return;
+        const overlay = document.createElement('div'); overlay.id = 'techDetailModalOverlay'; overlay.className = 'tech-modal-overlay';
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) this.closeModal(); });
+        const modalContent = document.createElement('div'); modalContent.className = 'tech-modal-content';
+        modalContent.innerHTML = `
+            <div class="tech-modal-header" id="techModalHeader">
+                <h3>Technician / Company Details</h3>
+                <button type="button" class="tech-modal-close" aria-label="Close">×</button>
+            </div>
+            <div class="tech-modal-body">
+                <div class="tech-modal-assignment-link"></div>
+                <div id="techModalScoreDisplay" class="overall-score-display" style="display:none;"></div>
+                <div id="techModalDetailsGrid" class="tech-modal-detail-grid"></div>
+            </div>
+            <div class="tech-modal-footer">
+                <button id="prevTechBtn" class="tech-modal-nav-btn">« Previous</button>
+                <span id="techCounter" style="margin: 0 10px;"></span>
+                <button id="nextTechBtn" class="tech-modal-nav-btn">Next »</button>
+            </div>`;
+        overlay.appendChild(modalContent); document.body.appendChild(overlay);
+        modalContent.querySelector('.tech-modal-header').addEventListener('mousedown', this.startDragTechModalBound);
+        overlay.querySelector('.tech-modal-close').addEventListener('click', () => this.closeModal());
+        overlay.querySelector('#prevTechBtn').addEventListener('click', () => this.showPrevTech());
+        overlay.querySelector('#nextTechBtn').addEventListener('click', () => this.showNextTech());
+    }
     startDragTechModal(e) { if (e.target.classList.contains('tech-modal-close')) return; this.techModalIsDragging = true; const modalContent = e.currentTarget.closest('.tech-modal-content'); const modalOverlay = document.getElementById('techDetailModalOverlay'); if (!modalOverlay || !modalContent) return; modalOverlay.style.userSelect = 'none'; this.techModalDragStartX = e.clientX - modalContent.offsetLeft; this.techModalDragStartY = e.clientY - modalContent.offsetTop; document.addEventListener('mousemove', this.doDragTechModalBound); document.addEventListener('mouseup', this.stopDragTechModalBound); }
     doDragTechModal(e) { if (!this.techModalIsDragging) return; const modalContent = document.getElementById('techDetailModalOverlay')?.querySelector('.tech-modal-content'); if (!modalContent) return; modalContent.style.left = (e.clientX - this.techModalDragStartX) + 'px'; modalContent.style.top = (e.clientY - this.techModalDragStartY) + 'px'; }
     stopDragTechModal() { this.techModalIsDragging = false; const modalOverlay = document.getElementById('techDetailModalOverlay'); if(modalOverlay) modalOverlay.style.userSelect = ''; document.removeEventListener('mousemove', this.doDragTechModalBound); document.removeEventListener('mouseup', this.stopDragTechModalBound); }
@@ -174,7 +324,7 @@ class WorkMarketTransformer {
         counter.textContent = `${techIndexInAssignment + 1} of ${techsForCurrentAssignment.length}`;
 
         const priorityFields = [
-            { key: 'user_uuid', label: 'User Profile' }, { key: 'name', label: 'Contact Name' },
+            { key: 'user_uuid', label: 'User Profile' }, { key: 'name', label: 'Contact Name' }, { key: 'user_id', label: 'User ID'}, {key: 'user_number', label: 'User Number'},
             { key: 'company_name', label: 'Company' }, { key: 'email', label: 'Email' },
             { key: 'work_phone', label: 'Work Phone' }, { key: 'mobile_phone', label: 'Mobile Phone' },
             { key: 'address', label: 'Address' }, { key: 'distance', label: 'Distance' },
@@ -185,39 +335,55 @@ class WorkMarketTransformer {
 
         const renderKeyValuePair = (key, value, parentEl, isNested = false) => {
             const formattedValue = this.formatValue(value, key);
-            const hideIfNoOrNA = ['question_pending', 'schedule_conflict', 'is_expired', 'is_schedule_negotiation', 'tiered_pricing_accepted'];
-            if (hideIfNoOrNA.includes(key) && (formattedValue === 'No' || formattedValue === 'N/A')) return;
-            if (key === 'declined_on' && formattedValue === 'N/A') return;
-            if (key === 'is_best_price' && formattedValue === 'No') return; // Hide if "No"
-            if (formattedValue === 'N/A' && !['declined_on', 'is_best_price'].includes(key)) return;
+            const hideIfNo = ['question_pending', 'schedule_conflict', 'is_expired', 'is_schedule_negotiation', 'tiered_pricing_accepted'];
+
+            if (formattedValue === 'N/A' && !(key === 'declined_on' && value === '')) { return; }
+            if (hideIfNo.includes(key) && formattedValue === 'No') { return; }
+            if (key === 'is_best_price' && formattedValue === 'No') return;
 
             const dt = document.createElement('dt');
             const priorityFieldEntry = priorityFields.find(pf => pf.key === key);
             dt.textContent = (priorityFieldEntry?.label || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())) + ':';
             if (isNested) dt.style.paddingLeft = '15px';
+
             const dd = document.createElement('dd');
             if (key === 'user_uuid') { dd.innerHTML = `<a href="https://www.workmarket.com/new-profile/${value}" target="_blank">${value}</a>`; }
             else if (key === 'email' && value) { const subject = encodeURIComponent(`Question regarding WO: ${currentAssignment?.title || this.currentModalAssignmentId || 'Assignment'}`); dd.innerHTML = `<a href="mailto:${value}?subject=${subject}&body=I have a question:">${value}</a>`; }
             else if ((key === 'work_phone' || key === 'mobile_phone') && value) { dd.innerHTML = `<a href="tel:${String(value).replace(/\D/g,'')}">${value}</a>`; }
             else if (key === 'address' && value) { dd.innerHTML = `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(value)}" target="_blank">${value}</a>`; }
-            else { dd.textContent = formattedValue; if (key === 'is_best_price' && formattedValue === 'Yes') { dd.classList.add('value-yes'); } }
+            else {
+                dd.textContent = formattedValue;
+                if (key === 'is_best_price' && formattedValue === 'Yes') { dd.classList.add('value-yes'); }
+            }
             parentEl.appendChild(dt); parentEl.appendChild(dd);
         };
 
         const renderSection = (title, dataObject, parentEl, isTopLevelSection = true, fieldOrder = null) => {
             if (!dataObject || Object.keys(dataObject).length === 0) return;
+            if (title === 'Negotiation Details') {
+                const negBooleans = ['is_expired', 'is_price_negotiation', 'is_schedule_negotiation', 'is_best_price', 'tiered_pricing_accepted'];
+                let hasSignificantNegData = Object.keys(dataObject).some(k => {
+                    if (negBooleans.includes(k)) return dataObject[k] === true;
+                    if (k === 'pricing' && dataObject.pricing && Object.keys(dataObject.pricing).length > 0) return true;
+                    return dataObject[k] !== null && String(dataObject[k]).trim() !== '' && !negBooleans.includes(k);
+                });
+                if (!hasSignificantNegData) return;
+            }
+
             if (isTopLevelSection) { const headerDt = document.createElement('dt'); headerDt.className = 'section-header-dt'; headerDt.textContent = title; parentEl.appendChild(headerDt); }
             const keysToIterate = fieldOrder || Object.keys(dataObject);
+
             for (const key of keysToIterate) {
                 if (dataObject.hasOwnProperty(key)) {
                     const value = dataObject[key];
-                    if ((title.includes('Scorecard (For Your Company)') || title.includes('Scorecard (Overall Platform)')) && typeof value === 'object' && value !== null && value.hasOwnProperty('all')) {
+                    if (title.includes('Scorecard') && typeof value === 'object' && value !== null && value.hasOwnProperty('all')) {
                          renderKeyValuePair.call(this, key, value.all, parentEl, true);
-                    } else if (title.includes('Pricing') || (title === 'Negotiation Details' && key !== 'pricing') || title.includes('Rating Details') || (title.includes('Scorecard') && typeof value !== 'object')) {
-                         if (typeof value !== 'object' || value === null) { renderKeyValuePair.call(this, key, value, parentEl, true); }
-                         else { renderSection.call(this, key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), value, parentEl, false); }
-                    } else if (!isTopLevelSection && (typeof value !== 'object' || value === null)) {
-                         renderKeyValuePair.call(this, key, value, parentEl, true);
+                    } else if (key === 'pricing' && title === 'Negotiation Details' && value && typeof value === 'object') {
+                        renderSection.call(this, 'Pricing', value, parentEl, false, ['type', 'per_hour_price', 'max_number_of_hours', 'flat_price',  'spend_limit', 'fee', 'total_cost', 'additional_expenses']); // Ordered pricing
+                    } else if (key === 'rating' && title.includes('Scorecard') && value && typeof value === 'object') {
+                        renderSection.call(this, 'Rating Details', value, parentEl, false);
+                    } else if (typeof value !== 'object' || value === null) { // Direct render for non-object values or if it's a direct property of negotiation
+                        renderKeyValuePair.call(this, key, value, parentEl, !isTopLevelSection);
                     }
                 }
             }
@@ -225,24 +391,13 @@ class WorkMarketTransformer {
 
         priorityFields.forEach(pf => { if (techRawData.hasOwnProperty(pf.key)) { renderKeyValuePair.call(this, pf.key, techRawData[pf.key], detailsGrid, false); } });
         if (techRawData.has_negotiation && techRawData.negotiation) {
-            const negDetails = techRawData.negotiation;
-            const negBooleans = ['is_expired', 'is_price_negotiation', 'is_schedule_negotiation', 'is_best_price', 'tiered_pricing_accepted'];
-            let hasSignificantNegData = Object.keys(negDetails).some(k => {
-                if (negBooleans.includes(k)) return negDetails[k] === true;
-                if (k === 'pricing' && negDetails.pricing && Object.keys(negDetails.pricing).length > 0) return true;
-                return negDetails[k] !== null && String(negDetails[k]).trim() !== '' && !negBooleans.includes(k);
-            });
-
-            if (hasSignificantNegData) {
-                const negHeaderDt = document.createElement('dt'); negHeaderDt.className = 'section-header-dt'; negHeaderDt.textContent = 'Negotiation Details'; detailsGrid.appendChild(negHeaderDt);
-                const negotiationFieldOrder = ['approval_status', 'requested_on_date', 'requested_on_fuzzy', 'is_expired', 'is_price_negotiation', 'is_schedule_negotiation', 'is_best_price', 'tiered_pricing_accepted', 'note'];
-                negotiationFieldOrder.forEach(negKey => { if (negDetails.hasOwnProperty(negKey)) { renderKeyValuePair.call(this, negKey, negDetails[negKey], detailsGrid, true); } });
-                if (negDetails.pricing) { renderSection.call(this, 'Pricing', negDetails.pricing, detailsGrid, false); }
-            }
+            const negotiationFieldOrder = ['approval_status', 'requested_on_date', 'requested_on_fuzzy','note', 'is_expired', 'is_price_negotiation', 'is_schedule_negotiation', 'is_best_price', 'tiered_pricing_accepted',  'pricing']; // pricing last
+            renderSection.call(this, 'Negotiation Details', techRawData.negotiation, detailsGrid, true, negotiationFieldOrder);
         }
         if (techRawData.resource_scorecard_for_company) { if (techRawData.resource_scorecard_for_company.values) { renderSection.call(this, 'Scorecard (For Your Company)', techRawData.resource_scorecard_for_company.values, detailsGrid); } if(techRawData.resource_scorecard_for_company.rating){renderSection.call(this, 'Company Rating Details', techRawData.resource_scorecard_for_company.rating, detailsGrid);} }
         if (techRawData.resource_scorecard) { if (techRawData.resource_scorecard.values) { renderSection.call(this, 'Scorecard (Overall Platform)', techRawData.resource_scorecard.values, detailsGrid); } if(techRawData.resource_scorecard.rating){renderSection.call(this, 'Overall Rating Details', techRawData.resource_scorecard.rating, detailsGrid);} }
-        const keysToExclude = [ /* ... (same as V12) ... */ 'avatar_uri', 'avatar_asset_uri', 'user_uuid', 'encrypted_id', 'valuesWithStringKey', 'tieredPricingMetaData', 'labels', 'dispatcher', 'resource_scorecard_for_company', 'resource_scorecard', 'OverallScore', 'CostScore', 'DistanceScore', 'StatsScore', 'CPS_Final', 'IPS', 'assignmentId', 'raw_worker_data', 'user_id', 'user_number', 'latitude', 'longitude', 'new_user', 'rating_text', 'company_rating_text', 'lane', 'assign_to_first_to_accept', 'blocked', 'name', 'company_name', 'email', 'work_phone', 'mobile_phone', 'address', 'distance', 'status', 'sent_on', 'declined_on', 'question_pending', 'has_negotiation', 'schedule_conflict', 'negotiation', 'targeted' ];
+
+        const keysToExclude = [ /* ... (Adjust as needed, ensure all priority and section-handled keys are here) ... */ 'avatar_uri', 'avatar_asset_uri', 'user_uuid', 'encrypted_id', 'valuesWithStringKey', 'tieredPricingMetaData', 'labels', 'dispatcher', 'resource_scorecard_for_company', 'resource_scorecard', 'OverallScore', 'CostScore', 'DistanceScore', 'StatsScore', 'CPS_Final', 'IPS', 'assignmentId', 'raw_worker_data', 'user_id', 'user_number', 'latitude', 'longitude', 'new_user', 'rating_text', 'company_rating_text', 'lane', 'assign_to_first_to_accept', 'blocked', 'name', 'company_name', 'email', 'work_phone', 'mobile_phone', 'address', 'distance', 'status', 'sent_on', 'declined_on', 'question_pending', 'has_negotiation', 'schedule_conflict', 'negotiation', 'targeted'];
         let hasOtherDetails = false; const otherDetailsFragment = document.createDocumentFragment();
         for (const key in techRawData) { if (techRawData.hasOwnProperty(key) && !keysToExclude.includes(key) && !priorityFields.find(pf => pf.key === key)) { const value = techRawData[key]; if (value !== null && value !== undefined && String(value).trim() !== '') { if(!hasOtherDetails){ const otherDt = document.createElement('dt'); otherDt.className = 'section-header-dt'; otherDt.textContent = 'Other Raw Details'; otherDetailsFragment.appendChild(otherDt); hasOtherDetails = true; } renderKeyValuePair.call(this, key, value, otherDetailsFragment, false); } } }
         if(hasOtherDetails) detailsGrid.appendChild(otherDetailsFragment);
@@ -256,17 +411,16 @@ class WorkMarketTransformer {
     formatValue(value, key = '') { if (value === null || value === undefined || String(value).trim() === '') return 'N/A'; if (typeof value === 'boolean') return value ? 'Yes' : 'No'; const lowerKey = key.toLowerCase(); if (typeof value === 'number') { if (lowerKey.includes('price') || lowerKey.includes('cost') || lowerKey.includes('spend') || lowerKey.includes('fee')) { return `$${value.toFixed(2)}`; } if (lowerKey === 'distance') return `${value.toFixed(1)} miles`; if ((lowerKey.includes('percentage') || lowerKey.includes('rate') || lowerKey.includes('ratio')) && !lowerKey.includes('rating')) { if (value >= 0 && value <= 1.000001) { return `${(value * 100).toFixed(2)}%`; } } return value.toFixed(2); } return String(value); }
 
     waitForAssignmentsAndInitialize() {
-        console.log(`${this.SCRIPT_PREFIX} Inside waitForAssignmentsAndInitialize. Watching container:`, this.originalResultsContainerSource);
+        console.log(`${this.SCRIPT_PREFIX} Inside waitForAssignmentsAndInitialize.`);
         if (this.transformationInitialized && document.getElementById('customAssignmentsTable_overlay')) { console.log(`${this.SCRIPT_PREFIX} Transformation already ran and table exists. Exiting wait.`); return; }
         this.transformationInitialized = false;
-
         if (!this.originalResultsContainerSource) { console.error(`${this.SCRIPT_PREFIX} originalResultsContainerSource is null! Cannot observe.`); return; }
         if (this.originalResultsContainerSource.querySelector(this.assignmentItemSelector)) {
-            console.log(`${this.SCRIPT_PREFIX} Assignment items found on IMMEDIATE check inside waitForAssignments.`);
+            console.log(`${this.SCRIPT_PREFIX} Assignment items found on IMMEDIATE check.`);
             if (!this.transformationInitialized) { this.transformationInitialized = true; this.initializeTransformationSequence().catch(err => console.error(`${this.SCRIPT_PREFIX} Error (immediate init):`, err)); }
             return;
         }
-        if (this.observer) { this.observer.disconnect(); console.log(`${this.SCRIPT_PREFIX} Disconnected existing observer before creating new one.`);}
+        if (this.observer) { this.observer.disconnect(); console.log(`${this.SCRIPT_PREFIX} Disconnected existing observer.`);}
         this.observer = new MutationObserver((mutationsList, obs) => { if (this.transformationInitialized) { obs.disconnect(); this.observer = null; return; } if (this.originalResultsContainerSource.querySelector(this.assignmentItemSelector)) { console.log(`${this.SCRIPT_PREFIX} Assignment items DETECTED by MutationObserver.`); obs.disconnect(); this.observer = null; if (!this.transformationInitialized) { this.transformationInitialized = true; this.initializeTransformationSequence().catch(err => console.error(`${this.SCRIPT_PREFIX} Error (observer init):`, err)); } } });
         try { this.observer.observe(this.originalResultsContainerSource, { childList: true, subtree: true }); console.log(`${this.SCRIPT_PREFIX} MutationObserver started.`); }
         catch (e) { console.error(`${this.SCRIPT_PREFIX} ERROR starting MutationObserver:`, e); this.observer = null; this.attemptFallbackInitializationPolling(null); return; }
@@ -307,116 +461,36 @@ class WorkMarketTransformer {
 
     exportDataToCsv() {
         console.log(`${this.SCRIPT_PREFIX} Starting CSV export...`);
-        if (this.tableData.length === 0) {
-            alert("No data available to export.");
-            console.log(`${this.SCRIPT_PREFIX} No data for CSV export.`);
-            return;
-        }
-
-        const csvHeader = [
-            // Assignment Data
-            "Assignment ID", "Assignment Title", "Assignment Status", "Scheduled Date", "Scheduled Time",
-            "Site Name", "City", "State", "Zip", "Assignment Price", "Granite Ticket",
-            // Tech Data
-            "Tech User ID", "Tech User Number", "Tech Display Name", "Tech Company Name", "Tech Contact Name",
-            "Tech Email", "Tech Work Phone", "Tech Mobile Phone", "Tech Address", "Distance (mi)",
-            "Overall Score", "Cost Score", "Distance Score", "Stats Score", "CPS Final", "IPS",
-            "Has Negotiation?", "Question Pending?", "Schedule Conflict?", "Negotiation Note",
-            "Negotiation Total Cost ($)", "Negotiation Per Hour Price ($)", "Negotiation Spend Limit ($)",
-            "SC: Completed Work", "SC: Cancelled Work", "SC: Cancelled <24h", "SC: Late Work", "SC: Abandoned Work",
-            "SC: On Time %", "SC: Satisfaction Rate"
-        ];
-
+        if (this.tableData.length === 0) { alert("No data available to export."); console.log(`${this.SCRIPT_PREFIX} No data for CSV export.`); return; }
+        const csvHeader = [ "Assignment ID", "Assignment Title", "Assignment Status", "Scheduled Date", "Scheduled Time", "Site Name", "City", "State", "Zip", "Assignment Price", "Granite Ticket", "Tech User ID", "Tech User Number", "Tech Display Name", "Tech Company Name", "Tech Contact Name", "Tech Email", "Tech Work Phone", "Tech Mobile Phone", "Tech Address", "Distance (mi)", "Overall Score", "Cost Score", "Distance Score", "Stats Score", "CPS Final", "IPS", "Has Negotiation?", "Question Pending?", "Schedule Conflict?", "Negotiation Note", "Negotiation Total Cost ($)", "Negotiation Per Hour Price ($)", "Negotiation Spend Limit ($)", "SC: Completed Work", "SC: Cancelled Work", "SC: Cancelled <24h", "SC: Late Work", "SC: Abandoned Work", "SC: On Time %", "SC: Satisfaction Rate" ];
         const csvRows = [csvHeader.join(",")];
-
         this.tableData.forEach(assignment => {
             const techs = this.currentAssignmentTechsData[assignment.assignmentId] || [];
-            if (techs.length === 0) {
-                // Optionally, add a row for assignments with no matching techs
-                // const assignmentRow = [
-                //     `"${assignment.assignmentId || ''}"`, `"${assignment.title || ''}"`, `"${assignment.status || ''}"`,
-                //     // ... fill other assignment fields, then many N/As for tech fields
-                // ];
-                // csvRows.push(assignmentRow.join(","));
-            } else {
+            if (techs.length === 0) { /* Optionally add a row for assignments with no matching techs */ }
+            else {
                 techs.forEach(tech => {
-                    const techDisplayName = (tech.company_name && tech.company_name.toLowerCase() === 'sole proprietor')
-                        ? (tech.name || tech.company_name || '')
-                        : (tech.company_name || '');
-                    const techContactName = (tech.company_name && tech.company_name.toLowerCase() !== 'sole proprietor' && tech.name && tech.name.toLowerCase() !== tech.company_name.toLowerCase())
-                        ? tech.name : ( (tech.company_name && tech.company_name.toLowerCase() === 'sole proprietor') ? '' : tech.name || '');
-
-
+                    const techDisplayName = (tech.company_name && tech.company_name.toLowerCase() === 'sole proprietor') ? (tech.name || tech.company_name || '') : (tech.company_name || '');
+                    const techContactName = (tech.company_name && tech.company_name.toLowerCase() !== 'sole proprietor' && tech.name && tech.name.toLowerCase() !== tech.company_name.toLowerCase()) ? tech.name : ( (tech.company_name && tech.company_name.toLowerCase() === 'sole proprietor') ? '' : tech.name || '');
                     const row = [
-                        // Assignment Data
-                        `"${assignment.assignmentId || ''}"`,
-                        `"${(assignment.title || '').replace(/"/g, '""')}"`,
-                        `"${(assignment.status || '').replace(/"/g, '""')}"`,
-                        `"${(assignment.parsedDate || '').replace(/"/g, '""')}"`,
-                        `"${(assignment.parsedTime || '').replace(/"/g, '""')}"`,
-                        `"${(assignment.siteName || '').replace(/"/g, '""')}"`,
-                        `"${(assignment.city || '').replace(/"/g, '""')}"`,
-                        `"${(assignment.state || '').replace(/"/g, '""')}"`,
-                        `"${(assignment.zip || '').replace(/"/g, '""')}"`,
-                        `"${assignment.priceNumeric || '0.00'}"`,
-                        `"${(assignment.graniteTicket || '').replace(/"/g, '""')}"`,
-                        // Tech Data
-                        `"${tech.user_id || ''}"`,
-                        `"${tech.user_number || ''}"`,
-                        `"${techDisplayName.replace(/"/g, '""')}"`,
-                        `"${(tech.company_name || '').replace(/"/g, '""')}"`,
-                        `"${(techContactName || '').replace(/"/g, '""')}"`,
-                        `"${tech.email || ''}"`,
-                        `"${tech.work_phone || ''}"`,
-                        `"${tech.mobile_phone || ''}"`,
-                        `"${(tech.address || '').replace(/"/g, '""')}"`,
-                        `"${tech.distance !== undefined ? parseFloat(tech.distance).toFixed(1) : ''}"`,
-                        `"${tech.OverallScore || ''}"`,
-                        `"${tech.CostScore || ''}"`,
-                        `"${tech.DistanceScore || ''}"`,
-                        `"${tech.StatsScore || ''}"`,
-                        `"${tech.CPS_Final || ''}"`,
-                        `"${tech.IPS || ''}"`,
-                        `"${this.formatValue(tech.has_negotiation, 'has_negotiation')}"`,
-                        `"${this.formatValue(tech.question_pending, 'question_pending')}"`,
-                        `"${this.formatValue(tech.schedule_conflict, 'schedule_conflict')}"`,
-                        `"${(tech.negotiation?.note || '').replace(/"/g, '""').replace(/\n/g, ' ')}"`, // Replace newlines in notes
-                        `"${tech.negotiation?.pricing?.total_cost !== undefined ? parseFloat(tech.negotiation.pricing.total_cost).toFixed(2) : ''}"`,
-                        `"${tech.negotiation?.pricing?.per_hour_price !== undefined ? parseFloat(tech.negotiation.pricing.per_hour_price).toFixed(2) : ''}"`,
-                        `"${tech.negotiation?.pricing?.spend_limit !== undefined ? parseFloat(tech.negotiation.pricing.spend_limit).toFixed(2) : ''}"`,
-                        `"${tech.resource_scorecard?.values?.COMPLETED_WORK?.all || ''}"`,
-                        `"${tech.resource_scorecard?.values?.CANCELLED_WORK?.all || ''}"`,
-                        `"${tech.resource_scorecard?.values?.CANCELLED_WORK_IN_LESS_THAN_24_HOURS?.all || ''}"`,
-                        `"${tech.resource_scorecard?.values?.LATE_WORK?.all || ''}"`,
-                        `"${tech.resource_scorecard?.values?.ABANDONED_WORK?.all || ''}"`,
-                        `"${tech.resource_scorecard?.values?.ON_TIME_PERCENTAGE?.all !== undefined ? (parseFloat(tech.resource_scorecard.values.ON_TIME_PERCENTAGE.all)*100).toFixed(2) + '%' : ''}"`,
-                        `"${tech.resource_scorecard?.rating?.satisfactionRate !== undefined ? (parseFloat(tech.resource_scorecard.rating.satisfactionRate)*100).toFixed(2) + '%' : ''}"`
+                        `"${assignment.assignmentId || ''}"`, `"${(assignment.title || '').replace(/"/g, '""')}"`, `"${(assignment.status || '').replace(/"/g, '""')}"`, `"${(assignment.parsedDate || '').replace(/"/g, '""')}"`, `"${(assignment.parsedTime || '').replace(/"/g, '""')}"`, `"${(assignment.siteName || '').replace(/"/g, '""')}"`, `"${(assignment.city || '').replace(/"/g, '""')}"`, `"${(assignment.state || '').replace(/"/g, '""')}"`, `"${(assignment.zip || '').replace(/"/g, '""')}"`, `"${assignment.priceNumeric || '0.00'}"`, `"${(assignment.graniteTicket || '').replace(/"/g, '""')}"`,
+                        `"${tech.user_id || ''}"`, `"${tech.user_number || ''}"`, `"${techDisplayName.replace(/"/g, '""')}"`, `"${(tech.company_name || '').replace(/"/g, '""')}"`, `"${(techContactName || '').replace(/"/g, '""')}"`, `"${tech.email || ''}"`, `"${tech.work_phone || ''}"`, `"${tech.mobile_phone || ''}"`, `"${(tech.address || '').replace(/"/g, '""')}"`, `"${tech.distance !== undefined ? parseFloat(tech.distance).toFixed(1) : ''}"`,
+                        `"${tech.OverallScore || ''}"`, `"${tech.CostScore || ''}"`, `"${tech.DistanceScore || ''}"`, `"${tech.StatsScore || ''}"`, `"${tech.CPS_Final || ''}"`, `"${tech.IPS || ''}"`,
+                        `"${this.formatValue(tech.has_negotiation, 'has_negotiation')}"`, `"${this.formatValue(tech.question_pending, 'question_pending')}"`, `"${this.formatValue(tech.schedule_conflict, 'schedule_conflict')}"`, `"${(tech.negotiation?.note || '').replace(/"/g, '""').replace(/\n/g, ' ')}"`,
+                        `"${tech.negotiation?.pricing?.total_cost !== undefined ? parseFloat(tech.negotiation.pricing.total_cost).toFixed(2) : ''}"`, `"${tech.negotiation?.pricing?.per_hour_price !== undefined ? parseFloat(tech.negotiation.pricing.per_hour_price).toFixed(2) : ''}"`, `"${tech.negotiation?.pricing?.spend_limit !== undefined ? parseFloat(tech.negotiation.pricing.spend_limit).toFixed(2) : ''}"`,
+                        `"${tech.resource_scorecard?.values?.COMPLETED_WORK?.all || ''}"`, `"${tech.resource_scorecard?.values?.CANCELLED_WORK?.all || ''}"`, `"${tech.resource_scorecard?.values?.CANCELLED_WORK_IN_LESS_THAN_24_HOURS?.all || ''}"`, `"${tech.resource_scorecard?.values?.LATE_WORK?.all || ''}"`, `"${tech.resource_scorecard?.values?.ABANDONED_WORK?.all || ''}"`,
+                        `"${tech.resource_scorecard?.values?.ON_TIME_PERCENTAGE?.all !== undefined ? (parseFloat(tech.resource_scorecard.values.ON_TIME_PERCENTAGE.all)*100).toFixed(2) + '%' : ''}"`, `"${tech.resource_scorecard?.rating?.satisfactionRate !== undefined ? (parseFloat(tech.resource_scorecard.rating.satisfactionRate)*100).toFixed(2) + '%' : ''}"`
                     ];
                     csvRows.push(row.join(","));
                 });
             }
         });
-
-        const csvString = csvRows.join("\r\n");
-        const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement("a");
-        const url = URL.createObjectURL(blob);
-        const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
-        link.setAttribute("href", url);
-        link.setAttribute("download", `workmarket_assignments_export_${timestamp}.csv`);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        console.log(`${this.SCRIPT_PREFIX} CSV export triggered.`);
+        const csvString = csvRows.join("\r\n"); const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement("a"); const url = URL.createObjectURL(blob); const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-'); link.setAttribute("href", url); link.setAttribute("download", `workmarket_assignments_export_${timestamp}.csv`); link.style.visibility = 'hidden'; document.body.appendChild(link); link.click(); document.body.removeChild(link); console.log(`${this.SCRIPT_PREFIX} CSV export triggered.`);
     }
-
 
 } // End of WorkMarketTransformer class
 
 // --- Script Entry Point ---
 try {
-    // Remove the instance check to always re-run
     if (document.getElementById('assignment_list_results') &&
         (window.location.href.includes('/assignments') || window.location.href.includes('/workorders'))) {
 
