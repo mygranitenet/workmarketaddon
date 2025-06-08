@@ -2,7 +2,6 @@
 
 /**
  * Manages the creation and interaction of UI overlays and modals.
- * This class will be instantiated by WorkMarketTransformer.
  */
 export class UIManager {
     constructor(scriptPrefix, mainOverlayId = 'wmTransformerOverlay', techModalId = 'techDetailModalOverlay') {
@@ -11,7 +10,7 @@ export class UIManager {
         this.techModalId = techModalId;
 
         this.mainOverlay = null;
-        this.mainOverlayContentTarget = null; // For table rendering
+        this.mainOverlayContentTarget = null; // For table rendering by WorkMarketTransformer
         this.techModalOverlay = null;
 
         // Main Overlay Drag/Resize State
@@ -55,7 +54,8 @@ export class UIManager {
 
         this.mainOverlayContentTarget = document.createElement('div');
         this.mainOverlayContentTarget.className = 'overlay-content';
-        // ID for table rendering target is set by WorkMarketTransformer class for clarity.
+        // The ID for table rendering target will be set by WorkMarketTransformer class on this element if needed,
+        // or it can just pass this.mainOverlayContentTarget to its renderTable method.
 
         const resizeHandle = document.createElement('div');
         resizeHandle.className = 'overlay-resize-handle';
@@ -125,29 +125,88 @@ export class UIManager {
         this.techModalOverlay.appendChild(modalContent);
         document.body.appendChild(this.techModalOverlay);
 
+        // Dragging for the modal content itself, not the overlay
         modalContent.querySelector('.tech-modal-header').addEventListener('mousedown', this.startDragTechModal.bind(this));
         this.techModalOverlay.querySelector('.tech-modal-close').addEventListener('click', () => this.closeTechModal());
-        this.techModalOverlay.querySelector('#prevTechBtnModal').addEventListener('click', () => this.showPrevTechInModal());
-        this.techModalOverlay.querySelector('#nextTechBtnModal').addEventListener('click', () => this.showNextTechInModal());
+
+        // Navigation button event listeners will be set up by the main class using callbacks
+        // as UIManager doesn't know about the main class's data or methods directly.
         console.log(`${this.SCRIPT_PREFIX} Tech details modal structure created.`);
     }
 
-    startDragTechModal(e) { if (e.target.classList.contains('tech-modal-close')) return; this.techModalIsDragging = true; const modalContent = e.currentTarget.closest('.tech-modal-content'); if (!this.techModalOverlay || !modalContent) return; this.techModalOverlay.style.userSelect = 'none'; this.techModalDragStartX = e.clientX - modalContent.offsetLeft; this.techModalDragStartY = e.clientY - modalContent.offsetTop; document.addEventListener('mousemove', this.doDragTechModalBound); document.addEventListener('mouseup', this.stopDragTechModalBound); }
-    doDragTechModal(e) { if (!this.techModalIsDragging) return; const modalContent = this.techModalOverlay.querySelector('.tech-modal-content'); if (!modalContent) return; const overlayRect = this.techModalOverlay.getBoundingClientRect(); modalContent.style.left = Math.min(Math.max(0, (e.clientX - this.techModalDragStartX)), overlayRect.width - modalContent.offsetWidth) + 'px'; modalContent.style.top = Math.min(Math.max(0, (e.clientY - this.techModalDragStartY)), overlayRect.height - modalContent.offsetHeight) + 'px'; }
-    stopDragTechModal() { this.techModalIsDragging = false; if(this.techModalOverlay) this.techModalOverlay.style.userSelect = ''; document.removeEventListener('mousemove', this.doDragTechModalBound); document.removeEventListener('mouseup', this.stopDragTechModalBound); }
+    startDragTechModal(e) {
+        if (e.target.classList.contains('tech-modal-close')) return;
+        this.techModalIsDragging = true;
+        const modalContent = e.currentTarget.closest('.tech-modal-content'); // The draggable part is the content
+        if (!this.techModalOverlay || !modalContent) return;
+        this.techModalOverlay.style.userSelect = 'none'; // Prevent text selection on overlay
+        modalContent.style.userSelect = 'none';      // Prevent text selection on content during drag
 
+        // Calculate initial offset from the top-left of the *viewport* for the modal content
+        const modalRect = modalContent.getBoundingClientRect();
+        this.techModalDragStartX = e.clientX - modalRect.left;
+        this.techModalDragStartY = e.clientY - modalRect.top;
 
-    // These will be set by WorkMarketTransformer instance before calling showTechDetailsModal
-    setCurrentTechModalNavContext(assignmentId, techIndex, showPrevCallback, showNextCallback) {
-        this.currentModalAssignmentId = assignmentId;
-        this.currentModalTechIndex = techIndex;
-        this.showPrevTechInModal = showPrevCallback; // Callbacks from main class
-        this.showNextTechInModal = showNextCallback;
+        // We need to drag relative to the overlay, so make sure overlay itself isn't moving
+        // For simplicity, we'll just ensure the modal content is positioned absolutely/fixed within the overlay
+        // The CSS already does this by making tech-modal-overlay fixed and tech-modal-content centered.
+        // If tech-modal-content was 'position: relative' inside a static overlay, dragging would be different.
+
+        document.addEventListener('mousemove', this.doDragTechModalBound);
+        document.addEventListener('mouseup', this.stopDragTechModalBound);
     }
 
-    displayTechModal(techRawData, assignmentTitle = 'Assignment') { // Renamed from showTechDetailsModal to avoid conflict
-        console.log(`${this.SCRIPT_PREFIX} Displaying modal for tech:`, techRawData.company_name || techRawData.name);
-        if (!this.techModalOverlay) this._createTechModal(); // Ensure it exists
+    doDragTechModal(e) {
+        if (!this.techModalIsDragging) return;
+        const modalContent = this.techModalOverlay.querySelector('.tech-modal-content');
+        if (!modalContent) return;
+
+        // New position relative to the viewport
+        let newTop = e.clientY - this.techModalDragStartY;
+        let newLeft = e.clientX - this.techModalDragStartX;
+
+        // Ensure the modal content (which is centered in the overlay) doesn't go too far off-screen
+        // For simplicity, we'll just set top/left of the overlay as it's fixed.
+        // If modal-content itself was positioned absolutely within the overlay, we'd set its top/left.
+        // Since it's centered, moving the overlay effectively moves the content.
+        this.techModalOverlay.style.left = newLeft + 'px'; // This will move the whole overlay
+        this.techModalOverlay.style.top = newTop + 'px';   // This will move the whole overlay
+
+        // If you want to drag the modal *content* within a *static* overlay, the logic would be:
+        // modalContent.style.position = 'absolute'; // If not already
+        // modalContent.style.left = (e.clientX - this.techModalDragStartX) + 'px';
+        // modalContent.style.top = (e.clientY - this.techModalDragStartY) + 'px';
+    }
+
+    stopDragTechModal() {
+        this.techModalIsDragging = false;
+        if(this.techModalOverlay) {
+            this.techModalOverlay.style.userSelect = '';
+            const modalContent = this.techModalOverlay.querySelector('.tech-modal-content');
+            if (modalContent) modalContent.style.userSelect = '';
+        }
+        document.removeEventListener('mousemove', this.doDragTechModalBound);
+        document.removeEventListener('mouseup', this.stopDragTechModalBound);
+    }
+
+    // Callbacks for modal navigation, to be set by WorkMarketTransformer
+    // These are placeholders; the actual functions are in the main class
+    showPrevTechInModal() { if (this._showPrevTechCallback) this._showPrevTechCallback(); }
+    showNextTechInModal() { if (this._showNextTechCallback) this._showNextTechCallback(); }
+
+    /**
+     * Updates the tech modal with new data and sets up navigation.
+     * @param {object} techRawData - The full data object for the tech.
+     * @param {string} assignmentTitle - Title of the current assignment.
+     * @param {number} techIndex - Current index of the tech in the list for this assignment.
+     * @param {number} totalTechs - Total number of techs for this assignment's modal navigation.
+     * @param {function} prevCallback - Function to call when "Previous" is clicked.
+     * @param {function} nextCallback - Function to call when "Next" is clicked.
+     * @param {function} formatValueCallback - Callback to format values.
+     */
+    displayTechModal(techRawData, assignmentTitle, techIndex, totalTechs, prevCallback, nextCallback, formatValueCallback) {
+        console.log(`${this.SCRIPT_PREFIX} UIManager: Displaying modal for tech:`, techRawData.company_name || techRawData.name);
+        if (!this.techModalOverlay) this._createTechModal();
 
         const modalScoreDisplay = this.techModalOverlay.querySelector('#techModalScoreDisplay');
         const detailsGrid = this.techModalOverlay.querySelector('#techModalDetailsGrid');
@@ -162,31 +221,85 @@ export class UIManager {
             modalScoreDisplay.style.display = 'none';
         }
 
-        // Update navigation buttons (state managed by WorkMarketTransformer class, passed via setCurrentTechModalNavContext)
         const prevBtn = this.techModalOverlay.querySelector('#prevTechBtnModal');
         const nextBtn = this.techModalOverlay.querySelector('#nextTechBtnModal');
         const counter = this.techModalOverlay.querySelector('#techCounterModal');
-        const techsForCurrentAssignment = window.WorkMarketTransformerInstance?.currentAssignmentTechsData[this.currentModalAssignmentId] || []; // Access instance directly
-        if (prevBtn) prevBtn.disabled = this.currentModalTechIndex <= 0;
-        if (nextBtn) nextBtn.disabled = this.currentModalTechIndex >= techsForCurrentAssignment.length - 1;
-        if (counter) counter.textContent = `${this.currentModalTechIndex + 1} of ${techsForCurrentAssignment.length}`;
 
+        if(prevBtn) prevBtn.disabled = techIndex <= 0;
+        if(nextBtn) nextBtn.disabled = techIndex >= totalTechs - 1;
+        if(counter) counter.textContent = `${techIndex + 1} of ${totalTechs}`;
 
-        const renderKeyValuePair = (key, value, parentEl, isNested = false) => { /* ... same as V9 renderKeyValuePair ... */ };
-        const renderSection = (title, dataObject, parentEl, isTopLevelSection = true) => { /* ... same as V9 renderSection ... */ };
-        // Call renderObject from V9, ensuring `this.formatValue` and other contexts are correct if you make it a method of UIManager
-        // For now, I'll assume formatValue is passed or globally available if not part of UIManager
-        const formatVal = window.WorkMarketTransformerInstance ? window.WorkMarketTransformerInstance.formatValue.bind(window.WorkMarketTransformerInstance) : (val => String(val));
+        // Update internal callbacks for nav buttons IF THEY CHANGE (e.g., different assignment)
+        // Or they can be set once when the main class instance is linked.
+        this._showPrevTechCallback = prevCallback;
+        this._showNextTechCallback = nextCallback;
 
-        function _renderObject(obj, parentElement, indentLevel = 0, pathPrefix = '') {
-            // ... (Full renderObject logic from V9, using `formatVal` instead of `this.formatValue`) ...
-            // ... Ensure links (email, phone, maps) are generated correctly. Email subject needs assignment title.
-        }
-        _renderObject(techRawData, detailsGrid); // Call the local renderObject
+        // Recursive rendering function, now using the passed formatValueCallback
+        const _renderObject = (obj, parentElement, indentLevel = 0, pathPrefix = '') => {
+            const keysToExclude = ['avatar_uri', 'avatar_asset_uri', 'user_uuid_for_link_only', 'encrypted_id', 'valuesWithStringKey', 'tieredPricingMetaData', 'labels', 'dispatcher', 'resource_scorecard_for_company', 'resource_scorecard', 'OverallScore', 'CostScore', 'DistanceScore', 'StatsScore', 'CPS_Final', 'IPS', 'assignmentId', 'raw_worker_data'];
+            const priorityFields = [
+                { key: 'user_uuid', label: 'User Profile' }, { key: 'name', label: 'Contact Name' },
+                { key: 'company_name', label: 'Company' }, { key: 'email', label: 'Email' },
+                { key: 'work_phone', label: 'Work Phone' }, { key: 'mobile_phone', label: 'Mobile Phone' },
+                { key: 'address', label: 'Address' }, { key: 'distance', label: 'Distance' },
+                { key: 'status', label: 'Invitation Status' }, { key: 'sent_on', label: 'Sent On' },
+                { key: 'declined_on', label: 'Declined On' }, { key: 'question_pending', label: 'Question Pending?' },
+                { key: 'has_negotiation', label: 'Has Negotiation?' }, { key: 'schedule_conflict', label: 'Schedule Conflict?' }
+            ];
+
+            const createDdWithValue = (key, value) => {
+                const dd = document.createElement('dd');
+                if (key === 'user_uuid') { dd.innerHTML = `<a href="https://www.workmarket.com/new-profile/${value}" target="_blank">${value}</a>`; }
+                else if (key === 'email' && value) { const subject = encodeURIComponent(`Question regarding WO: ${assignmentTitle}`); dd.innerHTML = `<a href="mailto:${value}?subject=${subject}&body=I have a question:">${value}</a>`; }
+                else if ((key === 'work_phone' || key === 'mobile_phone') && value) { dd.innerHTML = `<a href="tel:${String(value).replace(/\D/g,'')}">${value}</a>`; }
+                else if (key === 'address' && value) { dd.innerHTML = `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(value)}" target="_blank">${value}</a>`; }
+                else if (key === 'graniteTicket' && value) { dd.innerHTML = `<a href="YOUR_TICKET_SYSTEM_BASE_URL/${value}" target="_blank">${value}</a>`; /* REPLACE */ }
+                else { dd.textContent = formatValueCallback(value, key); } // Use passed formatter
+                return dd;
+            };
+
+            priorityFields.forEach(pf => {
+                if (obj.hasOwnProperty(pf.key)) {
+                    const value = obj[pf.key];
+                    if (formatValueCallback(value, pf.key) === 'N/A' && !(pf.key === 'declined_on' && value === '')) return;
+                    const dt = document.createElement('dt'); dt.textContent = (pf.label || pf.key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())) + ':';
+                    const dd = createDdWithValue(pf.key, value);
+                    parentElement.appendChild(dt); parentElement.appendChild(dd);
+                }
+            });
+
+            if (obj.has_negotiation && obj.negotiation) {
+                const negHeaderDt = document.createElement('dt'); negHeaderDt.className = 'section-header-dt'; negHeaderDt.textContent = 'Negotiation Details'; parentElement.appendChild(negHeaderDt);
+                _renderObject(obj.negotiation, parentElement, indentLevel + 1, 'negotiation');
+            }
+            if (obj.resource_scorecard_for_company && obj.resource_scorecard_for_company.values) {
+                const rscCompHeader = document.createElement('dt'); rscCompHeader.className = 'section-header-dt'; rscCompHeader.textContent = 'Scorecard (For Your Company)'; parentElement.appendChild(rscCompHeader);
+                _renderObject(obj.resource_scorecard_for_company.values, parentElement, indentLevel + 1, 'resource_scorecard_for_company.values');
+                if(obj.resource_scorecard_for_company.rating){ _renderObject(obj.resource_scorecard_for_company.rating, parentElement, indentLevel + 1, 'resource_scorecard_for_company.rating');}
+            }
+            if (obj.resource_scorecard && obj.resource_scorecard.values) {
+                const rscHeader = document.createElement('dt'); rscHeader.className = 'section-header-dt'; rscHeader.textContent = 'Scorecard (Overall Platform)'; parentElement.appendChild(rscHeader);
+                _renderObject(obj.resource_scorecard.values, parentElement, indentLevel + 1, 'resource_scorecard.values');
+                 if(obj.resource_scorecard.rating){ _renderObject(obj.resource_scorecard.rating, parentElement, indentLevel + 1, 'resource_scorecard.rating');}
+            }
+
+            let hasOtherDetails = false; const otherDetailsFragment = document.createDocumentFragment();
+            for (const key in obj) {
+                if (obj.hasOwnProperty(key) && !keysToExclude.includes(key) && !priorityFields.find(pf => pf.key === key) && key !== 'negotiation' && key !== 'resource_scorecard' && key !== 'has_negotiation' && key !== 'resource_scorecard_for_company') {
+                    const value = obj[key];
+                    if (formatValueCallback(value,key) === 'N/A') continue;
+                    if(!hasOtherDetails){ const otherDt = document.createElement('dt'); otherDt.className = 'section-header-dt'; otherDt.textContent = 'Other Raw Details'; otherDetailsFragment.appendChild(otherDt); hasOtherDetails = true; }
+                    const dt = document.createElement('dt'); dt.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) + ':'; dt.style.paddingLeft = `${(indentLevel + (key.includes('.') ? 1 : 0)) * 15}px`; // Basic indent for sub-keys
+                    const dd = createDdWithValue(key, value);
+                    otherDetailsFragment.appendChild(dt); otherDetailsFragment.appendChild(dd);
+                }
+            }
+            if(hasOtherDetails) parentElement.appendChild(otherDetailsFragment);
+        };
+        _renderObject(techRawData, detailsGrid);
 
         this.techModalOverlay.style.display = 'flex';
     }
-
 
     closeTechModal() {
         if (this.techModalOverlay) this.techModalOverlay.style.display = 'none';
