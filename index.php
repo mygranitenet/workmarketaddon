@@ -1,4 +1,4 @@
-
+<php>
 // CSS string (same as before, ensure it's complete in your actual script)
 const customCss = `
     /* ... ALL YOUR CSS FROM V10 ... */
@@ -325,5 +325,7 @@ try {
 } catch (e) {
     console.error(`${SCRIPT_PREFIX} CRITICAL ERROR DURING SCRIPT EXECUTION:`, e);
 }
+
+        </php>
 
 })(); // IIFE ends here
