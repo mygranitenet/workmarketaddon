@@ -1,6 +1,6 @@
 (async function() {
     'use strict';
-    const SCRIPT_PREFIX = '[WM TRANSFORMER V16.2.FULL]';
+    const SCRIPT_PREFIX = '[WM TRANSFORMER V16.3.FULL]';
     console.log(`${SCRIPT_PREFIX} Script starting...`);
 
     // --- Global CSS String ---
@@ -164,9 +164,8 @@ class WorkMarketTransformer {
             const appliedWorkers = allFetchedWorkers.filter(w => {
                 const isNotDeclined = w.declined_on === "";
                 const hasActiveNegotiation = w.has_negotiation === true && w.negotiation !== null;
-                 // Based on your sample, `w.status === "open"` from the workers endpoint means the invite itself is open.
-                 // `has_negotiation: true` is the key indicator they have applied/countered.
-                const hasApplied = hasActiveNegotiation; // Use this as the primary "applied" signal.
+                // Using the most reliable "applied" signal from your provided JSON
+                const hasApplied = hasActiveNegotiation; // Removed `&& w.status === "open"` as status might change after applying/negotiating
                 return isNotDeclined && hasApplied;
             });
 
@@ -227,7 +226,7 @@ class WorkMarketTransformer {
             responseText = await response.text();
             if (!response.ok) { console.error(`${this.SCRIPT_PREFIX} API Call [ERROR] - Failed for assignment view ${assignmentWorkNumber}: ${response.status} ${response.statusText}. Response Text:`, responseText); return null; }
             const data = JSON.parse(responseText);
-            console.log(`${this.SCRIPT_PREFIX} API Call [SUCCESS RAW JSON] - Assignment view data for ${assignmentWorkNumber}:`, data);
+            // console.log(`${this.SCRIPT_PREFIX} API Call [SUCCESS RAW JSON] - Assignment view data for ${assignmentWorkNumber}:`, data);
             const payload = data.result?.payload?.[0] || null;
             if (payload) this.currentAssignmentViewDataCache[assignmentWorkNumber] = payload;
             return payload;
@@ -251,7 +250,7 @@ class WorkMarketTransformer {
                         const icon = document.createElement('span'); icon.innerHTML = '📄'; icon.title = "View Assignment Details"; icon.style.cursor = "pointer";
                         icon.addEventListener('click', async () => {
                             if (item.assignmentId) {
-                                const details = await this.fetchAssignmentViewDetails(item.assignmentId);
+                                const details = await this.fetchAssignmentViewDetails(item.assignmentId); // assignmentId is the workNumber
                                 if (details) { this.showAssignmentDetailsModal(details); }
                                 else { alert(`Could not fetch details for assignment ${item.assignmentId}`); }
                             }
@@ -331,8 +330,8 @@ class WorkMarketTransformer {
             const formattedValue = this.formatValue(value, key);
             const hideIfNoOrNA = ['question_pending', 'schedule_conflict', 'is_expired', 'is_schedule_negotiation', 'tiered_pricing_accepted'];
 
-            if (formattedValue === 'N/A' && !(key === 'declined_on' && value === '')) return;
-            if (hideIfNoOrNA.includes(key) && formattedValue === 'No') return;
+            if (formattedValue === 'N/A' && !(key === 'declined_on' && value === '')) { return; }
+            if (hideIfNoOrNA.includes(key) && formattedValue === 'No') { return; }
             if (key === 'is_best_price' && formattedValue === 'No') return;
 
             const dt = document.createElement('dt');
@@ -384,7 +383,6 @@ class WorkMarketTransformer {
         if (techRawData.has_negotiation && techRawData.negotiation) { const negotiationFieldOrder = ['approval_status', 'requested_on_date', 'requested_on_fuzzy','note', 'is_expired', 'is_price_negotiation', 'is_schedule_negotiation', 'is_best_price', 'tiered_pricing_accepted',  'pricing']; renderSection.call(this, 'Negotiation Details', techRawData.negotiation, detailsGrid, true, negotiationFieldOrder); }
         if (techRawData.resource_scorecard_for_company) { if (techRawData.resource_scorecard_for_company.values) { renderSection.call(this, 'Scorecard (For Your Company)', techRawData.resource_scorecard_for_company.values, detailsGrid); } if(techRawData.resource_scorecard_for_company.rating){renderSection.call(this, 'Company Rating Details', techRawData.resource_scorecard_for_company.rating, detailsGrid);} }
         if (techRawData.resource_scorecard) { if (techRawData.resource_scorecard.values) { renderSection.call(this, 'Scorecard (Overall Platform)', techRawData.resource_scorecard.values, detailsGrid); } if(techRawData.resource_scorecard.rating){renderSection.call(this, 'Overall Rating Details', techRawData.resource_scorecard.rating, detailsGrid);} }
-
         const keysToExclude = [ 'avatar_uri', 'avatar_asset_uri', 'user_uuid', 'encrypted_id', 'valuesWithStringKey', 'tieredPricingMetaData', 'labels', 'dispatcher', 'resource_scorecard_for_company', 'resource_scorecard', 'OverallScore', 'CostScore', 'DistanceScore', 'StatsScore', 'CPS_Final', 'IPS', 'assignmentId', 'raw_worker_data', 'user_id', 'user_number', 'latitude', 'longitude', 'new_user', 'rating_text', 'company_rating_text', 'lane', 'assign_to_first_to_accept', 'blocked', 'name', 'company_name', 'email', 'work_phone', 'mobile_phone', 'address', 'distance', 'status', 'sent_on', 'declined_on', 'question_pending', 'has_negotiation', 'schedule_conflict', 'negotiation', 'targeted'];
         let hasOtherDetails = false; const otherDetailsFragment = document.createDocumentFragment();
         for (const key in techRawData) { if (techRawData.hasOwnProperty(key) && !keysToExclude.includes(key) && !priorityFields.find(pf => pf.key === key)) { const value = techRawData[key]; if (value !== null && value !== undefined && String(value).trim() !== '') { if(!hasOtherDetails){ const otherDt = document.createElement('dt'); otherDt.className = 'section-header-dt'; otherDt.textContent = 'Other Raw Details'; otherDetailsFragment.appendChild(otherDt); hasOtherDetails = true; } renderKeyValuePair.call(this, key, value, otherDetailsFragment, false); } } }
@@ -426,21 +424,85 @@ class WorkMarketTransformer {
         const detailsGrid = modalOverlay.querySelector('#assignmentModalDetailsGrid');
         detailsGrid.innerHTML = '';
 
-        const renderSimpleValue = (key, value, parent) => { const formattedValue = this.formatValue(value, key); if (formattedValue === 'N/A' && key !== 'declined_on') return; const dt = document.createElement('dt'); dt.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) + ':'; const dd = document.createElement('dd'); dd.textContent = formattedValue; parent.appendChild(dt); parent.appendChild(dd); };
-        const renderHtmlValue = (key, value, parent) => { const headerDt = document.createElement('dt'); headerDt.className = 'section-header-dt'; headerDt.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()); const dd = document.createElement('dd'); dd.className = 'html-content-dd'; dd.innerHTML = value || '(Not provided)'; parent.appendChild(headerDt); parent.appendChild(dd); };
-        const renderObjectSection = (title, obj, parent, excludeKeys = []) => { if (!obj || Object.keys(obj).length === 0) return; const headerDt = document.createElement('dt'); headerDt.className = 'section-header-dt'; headerDt.textContent = title; parent.appendChild(headerDt); for(const key in obj) { if (obj.hasOwnProperty(key) && !excludeKeys.includes(key)) { if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) { renderObjectSection(key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), obj[key], parent, true); } else { renderSimpleValue(key, obj[key], parent); } } } };
+        const createDtDd = (key, value, parent, isHtml = false, isSubItem = false) => {
+            const formattedValue = isHtml ? value : this.formatValue(value, key);
+            if (formattedValue === 'N/A') return; // Skip N/A values generally
 
-        renderSimpleValue('Title', assignmentDetails.title, detailsGrid);
-        renderSimpleValue('Work Number', assignmentDetails.workNumber, detailsGrid);
-        renderSimpleValue('Work Status', assignmentDetails.workDisplayStatus || assignmentDetails.workStatus, detailsGrid);
-        if (assignmentDetails.description) renderHtmlValue('Description', assignmentDetails.description, detailsGrid);
-        if (assignmentDetails.instructions) renderHtmlValue('Instructions', assignmentDetails.instructions, detailsGrid);
-        if (assignmentDetails.schedule) { renderObjectSection('Schedule', assignmentDetails.schedule, detailsGrid); }
-        if (assignmentDetails.location) { renderObjectSection('Location', assignmentDetails.location, detailsGrid); }
-        if (assignmentDetails.pricing) { renderObjectSection('Pricing', assignmentDetails.pricing, detailsGrid, false, ['payment']); if(assignmentDetails.pricing.payment) renderObjectSection('Payment Breakdown', assignmentDetails.pricing.payment, detailsGrid); }
-        if (assignmentDetails.internalOwner) { renderObjectSection('Internal Owner', assignmentDetails.internalOwner, detailsGrid); }
-        if (assignmentDetails.customFieldGroups && assignmentDetails.customFieldGroups.length > 0) { const headerDt = document.createElement('dt'); headerDt.className = 'section-header-dt'; headerDt.textContent = 'Custom Fields'; detailsGrid.appendChild(headerDt); assignmentDetails.customFieldGroups.forEach(group => { const groupHeaderDt = document.createElement('dt'); groupHeaderDt.className = 'sub-section-dt'; groupHeaderDt.textContent = group.name; detailsGrid.appendChild(groupHeaderDt); group.fields.forEach(field => renderSimpleValue(field.name, field.value, detailsGrid)); }); }
-        if (assignmentDetails.documents && assignmentDetails.documents.length > 0) { const headerDt = document.createElement('dt'); headerDt.className = 'section-header-dt'; headerDt.textContent = 'Documents'; detailsGrid.appendChild(headerDt); const ul = document.createElement('ul'); assignmentDetails.documents.forEach(doc => { const li = document.createElement('li'); li.innerHTML = `<a href="https://www.workmarket.com${doc.uri}" target="_blank">${doc.name}</a> ${doc.description ? '('+doc.description+')' : ''}`; ul.appendChild(li); }); const dd = document.createElement('dd'); dd.style.gridColumn = "1 / -1"; dd.appendChild(ul); detailsGrid.appendChild(dd); }
+            const dt = document.createElement('dt');
+            dt.textContent = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) + ':';
+            if(isSubItem) dt.style.paddingLeft = '20px'; // Indent sub-items for better readability
+            const dd = document.createElement('dd');
+            if (isHtml) {
+                // dd.className = 'html-content-dd'; // Use this if you want special box for HTML
+                dd.innerHTML = formattedValue || '(Not provided)';
+            } else {
+                dd.textContent = formattedValue;
+            }
+            parent.appendChild(dt);
+            parent.appendChild(dd);
+        };
+
+        const renderObjectAsSection = (title, dataObject, parent, fieldOrder = null, excludeKeys = []) => {
+            if (!dataObject || Object.keys(dataObject).length === 0) return;
+            const headerDt = document.createElement('dt');
+            headerDt.className = 'section-header-dt';
+            headerDt.textContent = title;
+            parent.appendChild(headerDt);
+
+            const keysToIterate = fieldOrder || Object.keys(dataObject);
+            for (const key of keysToIterate) {
+                if (dataObject.hasOwnProperty(key) && !excludeKeys.includes(key)) {
+                    const value = dataObject[key];
+                    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                        // For nested objects, render them as a sub-section with their own header
+                        renderObjectAsSection(key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), value, parent, null, []); // No fieldOrder for deeper nests unless specified
+                    } else {
+                        createDtDd(key, value, parent, false, true); // Mark as sub-item for potential indent
+                    }
+                }
+            }
+        };
+
+        createDtDd('Title', assignmentDetails.title, detailsGrid);
+        createDtDd('Work Number', assignmentDetails.workNumber, detailsGrid);
+        createDtDd('Work Status', assignmentDetails.workDisplayStatus || assignmentDetails.workStatus, detailsGrid);
+
+        if (assignmentDetails.description) createDtDd('Description', `<div class="html-content-dd">${assignmentDetails.description}</div>`, detailsGrid, true);
+        if (assignmentDetails.instructions) createDtDd('Instructions', `<div class="html-content-dd">${assignmentDetails.instructions}</div>`, detailsGrid, true);
+
+        if (assignmentDetails.schedule) renderObjectAsSection('Schedule', assignmentDetails.schedule, detailsGrid);
+        if (assignmentDetails.location) renderObjectAsSection('Location', assignmentDetails.location, detailsGrid, ['name', 'address', 'contact', 'instructions', 'locationType', 'number']);
+        if (assignmentDetails.pricing) renderObjectAsSection('Pricing', assignmentDetails.pricing, detailsGrid, null, ['payment']);
+        if (assignmentDetails.pricing?.payment) renderObjectAsSection('Payment Details (under Pricing)', assignmentDetails.pricing.payment, detailsGrid); // Explicitly call for payment sub-object
+        if (assignmentDetails.internalOwner) renderObjectAsSection('Internal Owner', assignmentDetails.internalOwner, detailsGrid);
+
+        if (assignmentDetails.customFieldGroups && assignmentDetails.customFieldGroups.length > 0) {
+            const headerDt = document.createElement('dt'); headerDt.className = 'section-header-dt'; headerDt.textContent = 'Custom Fields'; detailsGrid.appendChild(headerDt);
+            assignmentDetails.customFieldGroups.forEach(group => {
+                const groupHeaderDt = document.createElement('dt'); groupHeaderDt.className = 'sub-section-dt'; groupHeaderDt.textContent = group.name; detailsGrid.appendChild(groupHeaderDt);
+                group.fields.forEach(field => createDtDd(field.name, field.value, detailsGrid, false, true));
+            });
+        }
+        if (assignmentDetails.documents && assignmentDetails.documents.length > 0) {
+            const headerDt = document.createElement('dt'); headerDt.className = 'section-header-dt'; headerDt.textContent = 'Documents'; detailsGrid.appendChild(headerDt);
+            const ul = document.createElement('ul'); ul.style.listStylePosition = 'inside'; ul.style.paddingLeft = '0';
+            assignmentDetails.documents.forEach(doc => {
+                const li = document.createElement('li');
+                li.innerHTML = `<a href="https://www.workmarket.com${doc.uri}" target="_blank">${doc.name}</a> ${doc.description ? '('+doc.description+')' : ''}`;
+                ul.appendChild(li);
+            });
+            const dd = document.createElement('dd'); dd.style.gridColumn = "1 / -1"; dd.appendChild(ul); detailsGrid.appendChild(dd);
+        }
+        if (assignmentDetails.deliverableRequirementGroup && assignmentDetails.deliverableRequirementGroup.deliverableRequirements?.length > 0) {
+            renderObjectAsSection('Deliverables', assignmentDetails.deliverableRequirementGroup, detailsGrid, ['instructions']); // Display instructions first
+            const delivUl = document.createElement('ul'); delivUl.style.listStylePosition = 'inside'; delivUl.style.paddingLeft = '0';
+             assignmentDetails.deliverableRequirementGroup.deliverableRequirements.forEach(deliv => {
+                const li = document.createElement('li');
+                li.textContent = `${deliv.type.replace(/_/g, ' ')} (${deliv.numberOfFiles} files) - ${deliv.instructions || ''}`;
+                delivUl.appendChild(li);
+            });
+            const delivDd = document.createElement('dd'); delivDd.style.gridColumn = "1 / -1"; delivDd.appendChild(delivUl); detailsGrid.appendChild(delivDd);
+        }
         modalOverlay.style.display = 'flex';
     }
 
