@@ -1,3 +1,10 @@
+// ==Bookmarklet Script==
+// @name         
+// @description  
+// @author       ilakskills
+// @version      V15.0
+// ==/Bookmarklet Script==
+
 (async function() {
     'use strict';
     const SCRIPT_PREFIX = '[WM TRANSFORMER V15.FULL]';
