@@ -1,18 +1,16 @@
 // ==UserScript==
 // @name         WorkMarket - Enhanced Assignment Details
 // @namespace    
-// @version      
+// @version      2.1
 // @description  Fetches detailed assignment, worker, notes, and log data from v3 APIs and displays it in new tabs on the assignment details page.
-// @author       
-// @match        
+// @author       ilakskills
+// @match        https://www.workmarket.com/assignments/details/*
 // @grant        
-// @grant        
-// @connect      
 // ==/UserScript==
 
 (async function() {
     'use strict';
-    const SCRIPT_PREFIX = '[WM DETAIL ENHANCER V2.0]';
+    const SCRIPT_PREFIX = '[WM DETAIL ENHANCER V2.1]';
     console.log(`${SCRIPT_PREFIX} Script starting...`);
 
     // --- Custom CSS for new tabs and content ---
@@ -69,6 +67,11 @@
                 return;
             }
 
+            // Clean up old tabs if the script re-runs on navigation
+            tabContainer.querySelectorAll('.enhancer-injected-tab').forEach(el => el.remove());
+            tabContentContainer.querySelectorAll('.enhancer-tab-content').forEach(el => el.remove());
+
+
             const tabIds = ['enhanced-details', 'applicants', 'notes', 'activity-log'];
             const tabLabels = ['Enhanced Details', 'Applicants', 'Notes', 'Activity Log'];
 
@@ -76,6 +79,7 @@
                 const id = tabIds[index];
                 // Create Tab
                 const li = document.createElement('li');
+                li.className = 'enhancer-injected-tab'; // Add class for easy cleanup
                 li.innerHTML = `<a href="#${id}" data-toggle="tab">${label}</a>`;
                 tabContainer.appendChild(li);
 
@@ -91,33 +95,22 @@
 
         async apiPostRequest(endpoint, payload) {
             const url = `https://www.workmarket.com${endpoint}`;
-            return new Promise((resolve, reject) => {
-                GM_xmlhttpRequest({
-                    method: 'POST',
-                    url: url,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json, text/plain, */*',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    data: JSON.stringify(payload),
-                    onload: function(response) {
-                        if (response.status >= 200 && response.status < 300) {
-                            try {
-                                resolve(JSON.parse(response.responseText));
-                            } catch (e) {
-                                reject(new Error(`JSON Parse Error: ${e.message}`));
-                            }
-                        } else {
-                            reject(new Error(`HTTP Error: ${response.status} ${response.statusText}`));
-                        }
-                    },
-                    onerror: function(error) {
-                        reject(new Error(`Request Error: ${error.details}`));
-                    }
-                });
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json, text/plain, */*',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify(payload)
             });
+
+            if (!response.ok) {
+                throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
+            }
+            return response.json();
         }
+
 
         async fetchAllDataAndRender() {
             const endpoints = {
@@ -157,14 +150,14 @@
                 }
             });
         }
-        
+
         renderError(tabKey, errorMessage) {
             let paneId = '';
             if (tabKey === 'details') paneId = 'enhanced-details';
             else if (tabKey === 'workers') paneId = 'applicants';
             else if (tabKey === 'log') paneId = 'activity-log';
             else paneId = tabKey;
-            
+
             const pane = document.getElementById(paneId);
             if (pane) {
                  pane.innerHTML = `<div class="enhancer-error">Error loading data: ${errorMessage}</div>`;
@@ -280,7 +273,7 @@
                 if(user.mobilePhoneNumber?.phoneNumber) contactInfo += `<div><a href="tel:${user.mobilePhoneNumber.phoneNumber}">${user.mobilePhoneNumber.phoneNumber}</a> (Mobile)</div>`;
 
                 const stats = `Cost: ${scores.CostScore}, Dist: ${scores.DistanceScore}, Perf: ${scores.StatsScore}<br/><small>(CPS: ${scores.CPS_Final}, IPS: ${scores.IPS})</small>`;
-                
+
                 tr.innerHTML = `
                     <td>
                         <a href="https://www.workmarket.com/new-profile/${user.userUuid}" target="_blank"><strong>${displayName}</strong></a>
@@ -357,7 +350,7 @@
              if (!key) return '';
              return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
         }
-        
+
         formatValue(value, key = '') {
             if (value === null || value === undefined || String(value).trim() === '') return 'N/A';
             if (typeof value === 'boolean') return value ? 'Yes' : 'No';
@@ -432,9 +425,28 @@
     }
 
     // --- Script Entry Point ---
-    // Use a short delay to ensure the page's own JS has finished rendering the tab structure
-    setTimeout(() => {
-        new WorkMarketDetailEnhancer();
-    }, 500);
+    // WorkMarket uses dynamic page loads, so we need to detect navigation changes.
+    let lastUrl = location.href;
+    new MutationObserver(() => {
+        const url = location.href;
+        if (url !== lastUrl) {
+            lastUrl = url;
+            onUrlChange();
+        }
+    }).observe(document, { subtree: true, childList: true });
+
+    function onUrlChange() {
+        // Use a short delay to ensure the page's own JS has finished rendering the new page
+        setTimeout(() => {
+            if (location.href.includes('/assignments/details/')) {
+                 if (!document.querySelector('.enhancer-injected-tab')) { // Only run if our tabs aren't already there
+                    new WorkMarketDetailEnhancer();
+                 }
+            }
+        }, 500);
+    }
+    
+    // Initial run on page load
+    onUrlChange();
 
 })();
