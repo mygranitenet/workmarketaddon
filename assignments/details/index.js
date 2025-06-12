@@ -1,26 +1,31 @@
 // ==UserScript==
 // @name         WorkMarket - Enhanced Assignment Details
-// @namespace    
-// @version      2.1
-// @description  Fetches detailed assignment, worker, notes, and log data from v3 APIs and displays it in new tabs on the assignment details page.
+// @namespace    http://tampermonkey.net/
+// @version      2.2
+// @description  Fetches detailed assignment, worker, notes, and log data from v3 APIs and displays it in a new, self-contained UI on the assignment details page.
 // @author       ilakskills
 // @match        https://www.workmarket.com/assignments/details/*
-// @grant        
+// @grant        GM_addStyle
 // ==/UserScript==
 
 (async function() {
     'use strict';
-    const SCRIPT_PREFIX = '[WM DETAIL ENHANCER V2.1]';
+    const SCRIPT_PREFIX = '[WM DETAIL ENHANCER V2.2]';
     console.log(`${SCRIPT_PREFIX} Script starting...`);
 
     // --- Custom CSS for new tabs and content ---
     const customCss = `
-        /* Tab and Content Styling */
-        .enhancer-tab-content { padding: 15px; border: 1px solid #ddd; border-top: none; background-color: #fff; }
+        .enhancer-wrapper { border: 1px solid #ccc; border-radius: 5px; margin-bottom: 20px; background: #f9f9f9; overflow: hidden; }
+        .enhancer-nav { display: flex; background-color: #e9ecef; border-bottom: 1px solid #ccc; }
+        .enhancer-nav button { background: none; border: none; padding: 10px 15px; cursor: pointer; font-size: 14px; font-weight: 500; color: #495057; border-bottom: 3px solid transparent; }
+        .enhancer-nav button:hover { background-color: #dde2e6; }
+        .enhancer-nav button.active { font-weight: bold; color: #0056b3; border-bottom-color: #0056b3; }
+        .enhancer-content { display: none; padding: 15px; background-color: #fff; }
+        .enhancer-content.active { display: block; }
+
         .enhancer-loading { font-style: italic; color: #888; padding: 20px; text-align: center; font-size: 1.2em; }
         .enhancer-error { color: #d9534f; font-weight: bold; }
 
-        /* Generic Data Grid (for Details tab) */
         .enhancer-grid { display: grid; grid-template-columns: minmax(200px, max-content) 1fr; gap: 6px 12px; font-size: 0.9em; }
         .enhancer-grid dt { font-weight: bold; color: #444; text-align: right; grid-column: 1; }
         .enhancer-grid dd { margin-left: 0; grid-column: 2; word-break: break-word; }
@@ -29,7 +34,6 @@
         .enhancer-grid .html-content a { color: #337ab7; }
         .enhancer-grid ul { padding-left: 20px; margin-top: 0; }
 
-        /* Table Styling (for Applicants, Notes, Log) */
         .enhancer-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85em; box-shadow: 0 0 8px rgba(0,0,0,0.1); }
         .enhancer-table thead tr { background-color: #4A5568; color: #ffffff; text-align: left; }
         .enhancer-table th, .enhancer-table td { padding: 6px 8px; border: 1px solid #ddd; vertical-align: top; }
@@ -50,7 +54,7 @@
                 return;
             }
             console.log(`${SCRIPT_PREFIX} Found workNumber: ${this.workNumber}`);
-            this.injectUI();
+            this.injectUI(); // This will now robustly inject a self-contained UI
             this.fetchAllDataAndRender();
         }
 
@@ -60,37 +64,68 @@
         }
 
         injectUI() {
-            const tabContainer = document.querySelector('ul.nav.nav-tabs');
-            const tabContentContainer = document.querySelector('div.tab-content');
-            if (!tabContainer || !tabContentContainer) {
-                console.error(`${SCRIPT_PREFIX} Could not find tab containers on page. Cannot inject UI.`);
+            // Find a stable anchor point on the page. The container for the main tabs is a good candidate.
+            const anchor = document.querySelector('#assignment_details_tabs');
+            if (!anchor) {
+                console.error(`${SCRIPT_PREFIX} Could not find anchor element #assignment_details_tabs. Cannot inject UI.`);
                 return;
             }
 
-            // Clean up old tabs if the script re-runs on navigation
-            tabContainer.querySelectorAll('.enhancer-injected-tab').forEach(el => el.remove());
-            tabContentContainer.querySelectorAll('.enhancer-tab-content').forEach(el => el.remove());
+            // Remove old UI if it exists from a previous navigation
+            const oldWrapper = document.querySelector('.enhancer-wrapper');
+            if (oldWrapper) oldWrapper.remove();
 
+            GM_addStyle(customCss);
 
-            const tabIds = ['enhanced-details', 'applicants', 'notes', 'activity-log'];
-            const tabLabels = ['Enhanced Details', 'Applicants', 'Notes', 'Activity Log'];
+            const wrapper = document.createElement('div');
+            wrapper.className = 'enhancer-wrapper';
 
-            tabLabels.forEach((label, index) => {
-                const id = tabIds[index];
-                // Create Tab
-                const li = document.createElement('li');
-                li.className = 'enhancer-injected-tab'; // Add class for easy cleanup
-                li.innerHTML = `<a href="#${id}" data-toggle="tab">${label}</a>`;
-                tabContainer.appendChild(li);
+            const nav = document.createElement('div');
+            nav.className = 'enhancer-nav';
+
+            const contentWrapper = document.createElement('div');
+
+            const tabInfo = [
+                { id: 'enhanced-details', label: 'Enhanced Details' },
+                { id: 'applicants', label: 'Applicants' },
+                { id: 'notes', label: 'Notes' },
+                { id: 'activity-log', label: 'Activity Log' }
+            ];
+
+            tabInfo.forEach((tab, index) => {
+                // Create Nav Button
+                const button = document.createElement('button');
+                button.textContent = tab.label;
+                button.dataset.target = `#${tab.id}`;
+                nav.appendChild(button);
 
                 // Create Content Pane
-                const pane = document.createElement('div');
-                pane.id = id;
-                pane.className = 'tab-pane enhancer-tab-content';
-                pane.innerHTML = `<div class="enhancer-loading">Loading ${label}...</div>`;
-                tabContentContainer.appendChild(pane);
+                const content = document.createElement('div');
+                content.id = tab.id;
+                content.className = 'enhancer-content';
+                content.innerHTML = `<div class="enhancer-loading">Loading ${tab.label}...</div>`;
+                contentWrapper.appendChild(content);
+
+                // Add click listener for tab switching
+                button.addEventListener('click', () => {
+                    nav.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+                    contentWrapper.querySelectorAll('.enhancer-content').forEach(cont => cont.classList.remove('active'));
+                    button.classList.add('active');
+                    document.querySelector(button.dataset.target).classList.add('active');
+                });
+
+                // Set first tab as active by default
+                if (index === 0) {
+                    button.classList.add('active');
+                    content.classList.add('active');
+                }
             });
-             GM_addStyle(customCss);
+
+            wrapper.appendChild(nav);
+            wrapper.appendChild(contentWrapper);
+            // Prepend our new UI inside the main content area
+            anchor.prepend(wrapper);
+            console.log(`${SCRIPT_PREFIX} UI injected successfully.`);
         }
 
         async apiPostRequest(endpoint, payload) {
@@ -111,7 +146,6 @@
             return response.json();
         }
 
-
         async fetchAllDataAndRender() {
             const endpoints = {
                 details: '/v3/assignment/view',
@@ -122,8 +156,8 @@
 
             const requests = Object.entries(endpoints).map(([key, endpoint]) =>
                 this.apiPostRequest(endpoint, { workNumber: this.workNumber })
-                    .then(data => ({ status: 'fulfilled', value: data, key }))
-                    .catch(error => ({ status: 'rejected', reason: error, key }))
+                .then(data => ({ status: 'fulfilled', value: data, key }))
+                .catch(error => ({ status: 'rejected', reason: error, key }))
             );
 
             const results = await Promise.all(requests);
@@ -160,13 +194,15 @@
 
             const pane = document.getElementById(paneId);
             if (pane) {
-                 pane.innerHTML = `<div class="enhancer-error">Error loading data: ${errorMessage}</div>`;
+                pane.innerHTML = `<div class="enhancer-error">Error loading data: ${errorMessage}</div>`;
             }
         }
 
         // --- RENDER FUNCTIONS ---
         renderAssignmentDetails(data) {
             const container = document.getElementById('enhanced-details');
+            if(!container) { console.error('Cannot find #enhanced-details container to render into.'); return; }
+
             const grid = document.createElement('dl');
             grid.className = 'enhancer-grid';
 
@@ -191,7 +227,7 @@
                 keys.forEach(key => {
                     if (obj.hasOwnProperty(key)) {
                         let value = obj[key];
-                         if(typeof value === 'object' && value !== null) {
+                        if (typeof value === 'object' && value !== null) {
                             renderSection(this.formatKey(key), value);
                         } else {
                             createDtDd(this.formatKey(key) + ':', this.formatValue(value, key));
@@ -203,8 +239,8 @@
             // Main Details
             createDtDd('Title:', data.title);
             createDtDd('Status:', data.workDisplayStatus);
-            if(data.description) createDtDd('Description:', `<div class="html-content">${data.description}</div>`, true);
-            if(data.instructions) createDtDd('Instructions:', `<div class="html-content">${data.instructions}</div>`, true);
+            if (data.description) createDtDd('Description:', `<div class="html-content">${data.description}</div>`, true);
+            if (data.instructions) createDtDd('Instructions:', `<div class="html-content">${data.instructions}</div>`, true);
 
             // Sections
             renderSection('Schedule', data.schedule);
@@ -216,31 +252,44 @@
 
             // Custom Fields
             if (data.customFieldGroups?.length > 0) {
-                 const header = document.createElement('dt'); header.className = 'section-header'; header.textContent = 'Custom Fields'; grid.appendChild(header);
-                 data.customFieldGroups.forEach(group => {
-                     group.fields.forEach(field => createDtDd(`${group.name} / ${field.name}:`, field.value));
-                 });
+                const header = document.createElement('dt');
+                header.className = 'section-header';
+                header.textContent = 'Custom Fields';
+                grid.appendChild(header);
+                data.customFieldGroups.forEach(group => {
+                    group.fields.forEach(field => createDtDd(`${group.name} / ${field.name}:`, field.value));
+                });
             }
-             // Documents
+            // Documents
             if (data.documents?.length > 0) {
-                 const header = document.createElement('dt'); header.className = 'section-header'; header.textContent = 'Documents'; grid.appendChild(header);
-                 const ul = document.createElement('ul');
-                 data.documents.forEach(doc => {
-                     ul.innerHTML += `<li><a href="https://www.workmarket.com${doc.uri}" target="_blank">${doc.name}</a> ${doc.description ? `(${doc.description})` : ''}</li>`;
-                 });
-                 const dd = document.createElement('dd'); dd.appendChild(ul); grid.appendChild(dd);
+                const header = document.createElement('dt');
+                header.className = 'section-header';
+                header.textContent = 'Documents';
+                grid.appendChild(header);
+                const ul = document.createElement('ul');
+                data.documents.forEach(doc => {
+                    ul.innerHTML += `<li><a href="https://www.workmarket.com${doc.uri}" target="_blank">${doc.name}</a> ${doc.description ? `(${doc.description})` : ''}</li>`;
+                });
+                const dd = document.createElement('dd');
+                dd.appendChild(ul);
+                grid.appendChild(dd);
             }
             // Deliverables
             if (data.deliverableRequirementGroup?.deliverableRequirements?.length > 0) {
-                const header = document.createElement('dt'); header.className = 'section-header'; header.textContent = 'Deliverables'; grid.appendChild(header);
-                if(data.deliverableRequirementGroup.instructions) {
-                     createDtDd('Instructions:', `<div class="html-content">${data.deliverableRequirementGroup.instructions}</div>`, true);
+                const header = document.createElement('dt');
+                header.className = 'section-header';
+                header.textContent = 'Deliverables';
+                grid.appendChild(header);
+                if (data.deliverableRequirementGroup.instructions) {
+                    createDtDd('Instructions:', `<div class="html-content">${data.deliverableRequirementGroup.instructions}</div>`, true);
                 }
                 const ul = document.createElement('ul');
                 data.deliverableRequirementGroup.deliverableRequirements.forEach(d => {
                     ul.innerHTML += `<li><strong>${d.numberOfFiles}x ${this.formatKey(d.type)}:</strong> ${d.instructions || ''}</li>`;
                 });
-                const dd = document.createElement('dd'); dd.appendChild(ul); grid.appendChild(dd);
+                const dd = document.createElement('dd');
+                dd.appendChild(ul);
+                grid.appendChild(dd);
             }
 
             container.innerHTML = '';
@@ -249,6 +298,8 @@
 
         renderWorkersTable(data) {
             const container = document.getElementById('applicants');
+            if(!container) { console.error('Cannot find #applicants container to render into.'); return; }
+
             if (!data.workers || data.workers.length === 0) {
                 container.innerHTML = 'No applicants or invited workers found.';
                 return;
@@ -268,9 +319,9 @@
                 const displayName = company.name === 'Sole Proprietor' ? user.firstName + ' ' + user.lastName : company.name;
 
                 let contactInfo = '';
-                if(user.email) contactInfo += `<div><a href="mailto:${user.email}">${user.email}</a></div>`;
-                if(user.phoneNumber?.phoneNumber) contactInfo += `<div><a href="tel:${user.phoneNumber.phoneNumber}">${user.phoneNumber.phoneNumber}</a> (Work)</div>`;
-                if(user.mobilePhoneNumber?.phoneNumber) contactInfo += `<div><a href="tel:${user.mobilePhoneNumber.phoneNumber}">${user.mobilePhoneNumber.phoneNumber}</a> (Mobile)</div>`;
+                if (user.email) contactInfo += `<div><a href="mailto:${user.email}">${user.email}</a></div>`;
+                if (user.phoneNumber?.phoneNumber) contactInfo += `<div><a href="tel:${user.phoneNumber.phoneNumber}">${user.phoneNumber.phoneNumber}</a> (Work)</div>`;
+                if (user.mobilePhoneNumber?.phoneNumber) contactInfo += `<div><a href="tel:${user.mobilePhoneNumber.phoneNumber}">${user.mobilePhoneNumber.phoneNumber}</a> (Mobile)</div>`;
 
                 const stats = `Cost: ${scores.CostScore}, Dist: ${scores.DistanceScore}, Perf: ${scores.StatsScore}<br/><small>(CPS: ${scores.CPS_Final}, IPS: ${scores.IPS})</small>`;
 
@@ -295,7 +346,9 @@
 
         renderNotes(data) {
             const container = document.getElementById('notes');
-             if (!data.notes || data.notes.length === 0) {
+            if(!container) { console.error('Cannot find #notes container to render into.'); return; }
+
+            if (!data.notes || data.notes.length === 0) {
                 container.innerHTML = 'No notes found.';
                 return;
             }
@@ -321,7 +374,9 @@
 
         renderActivityLog(data) {
             const container = document.getElementById('activity-log');
-             if (!data.logEntries || data.logEntries.length === 0) {
+            if(!container) { console.error('Cannot find #activity-log container to render into.'); return; }
+
+            if (!data.logEntries || data.logEntries.length === 0) {
                 container.innerHTML = 'No activity log entries found.';
                 return;
             }
@@ -345,10 +400,11 @@
             container.appendChild(table);
         }
 
-        // --- UTILITY AND SCORING FUNCTIONS (from original script) ---
+
+        // --- UTILITY AND SCORING FUNCTIONS ---
         formatKey(key) {
-             if (!key) return '';
-             return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            if (!key) return '';
+            return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
         }
 
         formatValue(value, key = '') {
@@ -361,14 +417,15 @@
                 }
                 if (lowerKey === 'distance') return `${value.toFixed(1)} mi`;
                 if ((lowerKey.includes('percentage') || lowerKey.includes('rate') || lowerKey.includes('ratio')) && !lowerKey.includes('rating')) {
-                    if (value >= 0 && value <= 1.000001) { return `${(value * 100).toFixed(2)}%`; }
+                    if (value >= 0 && value <= 1.000001) {
+                        return `${(value * 100).toFixed(2)}%`;
+                    }
                 }
                 return value.toFixed(2);
             }
             return String(value);
         }
 
-        // Adapted from original script. The JSON structure for workers is different here.
         calculateOverallScore(techData, assignmentBudget = 350) {
             let CS = 50, DS = 0, SS = 50, OS = 0;
             const totalCost = techData.negotiation?.pricing?.total_cost;
@@ -433,19 +490,19 @@
             lastUrl = url;
             onUrlChange();
         }
-    }).observe(document, { subtree: true, childList: true });
+    }).observe(document.body, { subtree: true, childList: true });
 
     function onUrlChange() {
         // Use a short delay to ensure the page's own JS has finished rendering the new page
         setTimeout(() => {
             if (location.href.includes('/assignments/details/')) {
-                 if (!document.querySelector('.enhancer-injected-tab')) { // Only run if our tabs aren't already there
+                if (!document.querySelector('.enhancer-wrapper')) { // Only run if our UI isn't already there
                     new WorkMarketDetailEnhancer();
-                 }
+                }
             }
-        }, 500);
+        }, 1000); // Increased delay slightly for more reliability
     }
-    
+
     // Initial run on page load
     onUrlChange();
 
