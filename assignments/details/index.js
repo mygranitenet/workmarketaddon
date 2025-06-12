@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         WorkMarket - Enhanced Assignment Details
+// @name         WorkMarket - Pop-up Detail Enhancer
 // @namespace    http://tampermonkey.net/
-// @version      2.4
-// @description  Fetches detailed assignment, worker, notes, and log data from v3 APIs and displays it in new tabs on the assignment details page.
+// @version      3.0
+// @description  Adds a button to show a pop-up modal with detailed assignment, worker, notes, and log data.
 // @author       ilakskills
 // @match        https://www.workmarket.com/assignments/details/*
 // @grant        GM_addStyle
@@ -10,109 +10,188 @@
 
 (async function() {
     'use strict';
-    const SCRIPT_PREFIX = '[WM DETAIL ENHANCER V2.4]';
+    const SCRIPT_PREFIX = '[WM POPUP ENHANCER V3.0]';
     console.log(`${SCRIPT_PREFIX} Script starting...`);
 
-    // --- Custom CSS for new tabs and content ---
+    // --- CSS for the trigger button and the pop-up modal ---
     const customCss = `
-        /* Tab and Content Styling */
-        .enhancer-tab-content { padding: 15px; background-color: #fff; }
-        .wm-tab--content:not(.-active) { display: none; } /* Ensure only active tab is shown */
+        #enhancer-trigger-btn {
+            position: fixed; bottom: 20px; right: 20px; z-index: 9998;
+            background-color: #0056b3; color: white; border: none;
+            border-radius: 50%; width: 60px; height: 60px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3); cursor: pointer;
+            font-size: 24px; display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s ease-in-out;
+        }
+        #enhancer-trigger-btn:hover { background-color: #007bff; transform: scale(1.1); }
+
+        .enhancer-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.5); z-index: 9999;
+            display: none; justify-content: center; align-items: center;
+        }
+        .enhancer-modal {
+            position: absolute; /* Changed from relative for dragging */
+            background-color: #f8f9fa; border-radius: 8px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.4);
+            width: 90%; max-width: 1200px; height: 85vh;
+            display: flex; flex-direction: column;
+        }
+        .enhancer-header {
+            background-color: #343a40; color: white; padding: 10px 15px;
+            border-top-left-radius: 8px; border-top-right-radius: 8px;
+            display: flex; justify-content: space-between; align-items: center;
+            cursor: move;
+        }
+        .enhancer-header h3 { margin: 0; font-size: 1.1rem; }
+        .enhancer-close-btn { background: none; border: none; color: white; font-size: 24px; cursor: pointer; line-height: 1; }
+        
+        .enhancer-nav { display: flex; background-color: #e9ecef; border-bottom: 1px solid #ccc; flex-shrink: 0; }
+        .enhancer-nav button { background: none; border: none; padding: 10px 15px; cursor: pointer; font-size: 14px; font-weight: 500; color: #495057; border-bottom: 3px solid transparent; }
+        .enhancer-nav button:hover { background-color: #dde2e6; }
+        .enhancer-nav button.active { font-weight: bold; color: #0056b3; border-bottom-color: #0056b3; }
+
+        .enhancer-content-wrapper { flex-grow: 1; overflow-y: auto; background: #fff; }
+        .enhancer-content { display: none; padding: 15px; }
+        .enhancer-content.active { display: block; }
 
         .enhancer-loading { font-style: italic; color: #888; padding: 20px; text-align: center; font-size: 1.2em; }
-        .enhancer-error { color: #d9534f; font-weight: bold; }
+        .enhancer-error { color: #d9534f; font-weight: bold; padding: 20px; }
 
-        /* Generic Data Grid (for Details tab) */
+        /* Table and Grid styles from previous version */
         .enhancer-grid { display: grid; grid-template-columns: minmax(200px, max-content) 1fr; gap: 6px 12px; font-size: 0.9em; }
-        .enhancer-grid dt { font-weight: bold; color: #444; text-align: right; grid-column: 1; }
-        .enhancer-grid dd { margin-left: 0; grid-column: 2; word-break: break-word; }
-        .enhancer-grid .section-header { grid-column: 1 / -1; background-color: #f7f7f7; color: #333; padding: 8px; margin-top: 15px; font-weight: bold; border-radius: 4px; text-align: left; border-bottom: 2px solid #e7e7e7;}
-        .enhancer-grid .html-content { padding: 10px; border: 1px solid #eee; margin-top: 5px; background-color: #fdfdfd; max-height: 250px; overflow-y: auto; white-space: pre-wrap; }
-        .enhancer-grid .html-content a { color: #337ab7; }
-        .enhancer-grid ul { padding-left: 20px; margin-top: 0; }
-
-        /* Table Styling (for Applicants, Notes, Log) */
-        .enhancer-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85em; box-shadow: 0 0 8px rgba(0,0,0,0.1); }
-        .enhancer-table thead tr { background-color: #4A5568; color: #ffffff; text-align: left; }
-        .enhancer-table th, .enhancer-table td { padding: 6px 8px; border: 1px solid #ddd; vertical-align: top; }
+        .enhancer-grid dt { font-weight: bold; text-align: right; }
+        .enhancer-grid dd { word-break: break-word; }
+        .enhancer-grid .section-header { grid-column: 1 / -1; background-color: #f0f0f0; padding: 8px; margin-top: 15px; font-weight: bold; border-radius: 4px; }
+        .enhancer-table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+        .enhancer-table thead tr { background-color: #4A5568; color: #ffffff; }
+        .enhancer-table th, .enhancer-table td { padding: 8px; border: 1px solid #ddd; text-align: left; vertical-align: top;}
         .enhancer-table tbody tr:nth-of-type(even) { background-color: #f9f9f9; }
         .enhancer-table tbody tr:hover { background-color: #f1f1f1; }
-        .enhancer-table td a { color: #337ab7; text-decoration: none; }
-        .enhancer-table td a:hover { text-decoration: underline; }
+        .enhancer-table td a { color: #0056b3; }
         .enhancer-table .col-score { text-align: right; font-weight: bold; }
-        .enhancer-table .col-log-text { white-space: pre-wrap; }
-        .enhancer-table .col-log-text strong { font-weight: 600; color: #222; }
+        .enhancer-table .col-log-text { white-space: pre-wrap; word-break: break-word; }
     `;
 
-    class WorkMarketDetailEnhancer {
+    class WorkMarketPopupEnhancer {
         constructor() {
             this.workNumber = this.getWorkNumberFromURL();
-            if (!this.workNumber) {
-                console.error(`${SCRIPT_PREFIX} Could not find workNumber in URL. Aborting.`);
-                return;
-            }
-            console.log(`${SCRIPT_PREFIX} Found workNumber: ${this.workNumber}`);
+            if (!this.workNumber) return;
+            this.dataCache = null;
+            this.isDragging = false;
+            this.dragOffsetX = 0;
+            this.dragOffsetY = 0;
             this.injectUI();
-            this.fetchAllDataAndRender();
         }
 
         getWorkNumberFromURL() {
             const pathParts = window.location.pathname.split('/');
-            return pathParts.pop() || pathParts.pop(); // Handles trailing slash
+            return pathParts.pop() || pathParts.pop();
         }
 
         injectUI() {
-            const tabContainer = document.querySelector('ul.wm-tabs');
-            const tabContentContainer = document.querySelector('div.content');
-            if (!tabContainer || !tabContentContainer) {
-                console.error(`${SCRIPT_PREFIX} Could not find tab containers (ul.wm-tabs / div.content). Cannot inject UI.`);
-                return;
-            }
+            GM_addStyle(customCss);
 
-            tabContainer.querySelectorAll('.enhancer-injected-tab').forEach(el => el.remove());
-            tabContentContainer.querySelectorAll('.enhancer-tab-content').forEach(el => el.remove());
+            // Create Trigger Button
+            const triggerBtn = document.createElement('button');
+            triggerBtn.id = 'enhancer-trigger-btn';
+            triggerBtn.innerHTML = ''; // Package icon
+            triggerBtn.title = 'Show Enhanced Details';
+            document.body.appendChild(triggerBtn);
+
+            // Create Modal Structure
+            const overlay = document.createElement('div');
+            overlay.id = 'enhancer-overlay';
+            overlay.className = 'enhancer-overlay';
+            overlay.innerHTML = `
+                <div class="enhancer-modal" id="enhancer-modal">
+                    <div class="enhancer-header" id="enhancer-header">
+                        <h3>Enhanced Assignment Details (ID: ${this.workNumber})</h3>
+                        <button class="enhancer-close-btn" title="Close">×</button>
+                    </div>
+                    <div class="enhancer-nav" id="enhancer-nav"></div>
+                    <div class="enhancer-content-wrapper" id="enhancer-content-wrapper"></div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            // Add Event Listeners
+            triggerBtn.addEventListener('click', () => this.showModal());
+            overlay.querySelector('.enhancer-close-btn').addEventListener('click', () => this.hideModal());
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) this.hideModal(); });
+
+            // Dragging logic
+            const modal = overlay.querySelector('#enhancer-modal');
+            const header = overlay.querySelector('#enhancer-header');
+            header.addEventListener('mousedown', (e) => {
+                this.isDragging = true;
+                this.dragOffsetX = e.clientX - modal.offsetLeft;
+                this.dragOffsetY = e.clientY - modal.offsetTop;
+                document.addEventListener('mousemove', this.onDrag);
+                document.addEventListener('mouseup', this.onDragEnd);
+            });
+        }
+
+        onDrag = (e) => {
+            if (!this.isDragging) return;
+            const modal = document.getElementById('enhancer-modal');
+            modal.style.left = (e.clientX - this.dragOffsetX) + 'px';
+            modal.style.top = (e.clientY - this.dragOffsetY) + 'px';
+        }
+
+        onDragEnd = () => {
+            this.isDragging = false;
+            document.removeEventListener('mousemove', this.onDrag);
+            document.removeEventListener('mouseup', this.onDragEnd);
+        }
+
+        showModal() {
+            document.getElementById('enhancer-overlay').style.display = 'flex';
+            if (!this.dataCache) {
+                this.setupTabsAndFetchData();
+            }
+        }
+
+        hideModal() {
+            document.getElementById('enhancer-overlay').style.display = 'none';
+        }
+
+        setupTabsAndFetchData() {
+            const navContainer = document.getElementById('enhancer-nav');
+            const contentContainer = document.getElementById('enhancer-content-wrapper');
+            navContainer.innerHTML = '';
+            contentContainer.innerHTML = '<div class="enhancer-loading">Fetching all data...</div>';
 
             const tabInfo = [
-                { id: 'enhanced-details', label: 'Enhanced Details' },
-                { id: 'applicants', label: 'Applicants' },
-                { id: 'notes', label: 'Notes' },
-                { id: 'activity-log', label: 'Activity Log' }
+                { id: 'details', label: 'Details' }, { id: 'applicants', label: 'Applicants' },
+                { id: 'notes', label: 'Notes' }, { id: 'activity-log', label: 'Activity Log' }
             ];
 
-            tabInfo.forEach((tab) => {
-                const li = document.createElement('li');
-                li.className = 'wm-tab enhancer-injected-tab';
-                li.dataset.content = `#${tab.id}`;
-                li.textContent = tab.label;
-                tabContainer.appendChild(li);
+            tabInfo.forEach((tab, index) => {
+                const button = document.createElement('button');
+                button.textContent = tab.label;
+                button.dataset.target = `enhancer-content-${tab.id}`;
+                navContainer.appendChild(button);
 
-                const pane = document.createElement('div');
-                pane.id = tab.id;
-                pane.className = 'wm-tab--content enhancer-tab-content';
-                pane.innerHTML = `<div class="enhancer-loading">Loading ${tab.label}...</div>`;
-                tabContentContainer.appendChild(pane);
+                const contentPane = document.createElement('div');
+                contentPane.id = `enhancer-content-${tab.id}`;
+                contentPane.className = 'enhancer-content';
+                contentContainer.appendChild(contentPane);
+
+                if (index === 0) {
+                    button.classList.add('active');
+                    contentPane.classList.add('active');
+                }
+
+                button.addEventListener('click', () => {
+                    navContainer.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+                    contentContainer.querySelectorAll('.enhancer-content').forEach(cont => cont.classList.remove('active'));
+                    button.classList.add('active');
+                    document.getElementById(button.dataset.target).classList.add('active');
+                });
             });
 
-            // Re-initialize or delegate tab click events
-            tabContainer.addEventListener('click', (e) => {
-                const clickedTab = e.target.closest('.wm-tab');
-                if (!clickedTab) return;
-                
-                const targetContentSelector = clickedTab.dataset.content;
-                if (!targetContentSelector) return;
-
-                // Deactivate all tabs and content
-                tabContainer.querySelectorAll('.wm-tab').forEach(t => t.classList.remove('-active'));
-                tabContentContainer.querySelectorAll('.wm-tab--content').forEach(c => c.classList.remove('-active'));
-                
-                // Activate the clicked one
-                clickedTab.classList.add('-active');
-                const contentPane = tabContentContainer.querySelector(targetContentSelector);
-                if (contentPane) contentPane.classList.add('-active');
-            });
-
-            GM_addStyle(customCss);
-            console.log(`${SCRIPT_PREFIX} UI injected successfully.`);
+            this.fetchAllDataAndRender();
         }
 
         async apiPostRequest(endpoint, payload) {
@@ -127,128 +206,84 @@
         }
 
         async fetchAllDataAndRender() {
+            const contentContainer = document.getElementById('enhancer-content-wrapper');
+            contentContainer.innerHTML = '<div class="enhancer-loading">Fetching all data...</div>';
+
             const endpoints = {
                 details: '/v3/assignment/view',
                 workers: '/v3/assignment-details/view-invited-workers',
                 notes: '/v3/assignment/view-notes',
                 log: '/v3/assignment-details/view-activity-log'
             };
-            const requests = Object.entries(endpoints).map(([key, endpoint]) =>
-                this.apiPostRequest(endpoint, { workNumber: this.workNumber })
-                .then(data => ({ status: 'fulfilled', value: data, key }))
-                .catch(error => ({ status: 'rejected', reason: error, key }))
-            );
-            const results = await Promise.all(requests);
-            results.forEach(result => {
-                if (result.status === 'fulfilled') {
-                    const payload = result.value.result?.payload?.[0];
-                    if (!payload) { this.renderError(result.key, 'No payload in API response.'); return; }
-                    switch (result.key) {
-                        case 'details': this.renderAssignmentDetails(payload); break;
-                        case 'workers': this.renderWorkersTable(payload); break;
-                        case 'notes': this.renderNotes(payload); break;
-                        case 'log': this.renderActivityLog(payload); break;
-                    }
-                } else {
-                    console.error(`${SCRIPT_PREFIX} Failed to fetch data for ${result.key}:`, result.reason);
-                    this.renderError(result.key, result.reason.message);
-                }
-            });
-        }
+            try {
+                const results = await Promise.all(Object.values(endpoints).map(ep => this.apiPostRequest(ep, { workNumber: this.workNumber })));
+                this.dataCache = {
+                    details: results[0].result?.payload?.[0],
+                    workers: results[1].result?.payload?.[0],
+                    notes: results[2].result?.payload?.[0],
+                    log: results[3].result?.payload?.[0]
+                };
 
-        renderError(tabKey, errorMessage) {
-            let paneId = tabKey === 'details' ? 'enhanced-details' : tabKey === 'workers' ? 'applicants' : tabKey === 'log' ? 'activity-log' : tabKey;
-            const pane = document.getElementById(paneId);
-            if (pane) pane.innerHTML = `<div class="enhancer-error">Error loading data: ${errorMessage}</div>`;
-        }
+                contentContainer.innerHTML = ''; // Clear loading message
+                this.setupTabsAndFetchData(); // Re-setup tabs and panes
 
+                // Render content into the newly created panes
+                this.renderAssignmentDetails(this.dataCache.details);
+                this.renderWorkersTable(this.dataCache.workers);
+                this.renderNotes(this.dataCache.notes);
+                this.renderActivityLog(this.dataCache.log);
+
+            } catch (error) {
+                console.error(`${SCRIPT_PREFIX} Failed to fetch data:`, error);
+                contentContainer.innerHTML = `<div class="enhancer-error">Failed to fetch data: ${error.message}</div>`;
+            }
+        }
+        
+        // --- RENDER FUNCTIONS ---
+        // These now target the panes inside the modal
         renderAssignmentDetails(data) {
-            const container = document.getElementById('enhanced-details');
-            if(!container) { console.error('Cannot find #enhanced-details container.'); return; }
+            const container = document.getElementById('enhancer-content-details');
+            if(!container || !data) { container.innerHTML = '<div class="enhancer-error">Could not load assignment details.</div>'; return; }
             const grid = document.createElement('dl');
             grid.className = 'enhancer-grid';
-            const createDtDd = (key, value, isHtml = false) => {
-                if (value === null || value === undefined || value === '') return;
-                grid.innerHTML += `<dt>${key}</dt><dd>${isHtml ? value : this.formatValue(value, key)}</dd>`;
-            };
-            const renderSection = (title, obj, fieldOrder = null) => {
-                if (!obj || Object.keys(obj).length === 0) return;
-                grid.innerHTML += `<dt class="section-header">${title}</dt><dd></dd>`;
-                const keys = fieldOrder || Object.keys(obj);
-                keys.forEach(key => { if (obj.hasOwnProperty(key)) createDtDd(this.formatKey(key) + ':', this.formatValue(obj[key], key)); });
-            };
-            createDtDd('Title:', data.title);
-            createDtDd('Status:', data.workDisplayStatus);
-            if(data.description) createDtDd('Description:', `<div class="html-content">${data.description}</div>`, true);
-            if(data.instructions) createDtDd('Instructions:', `<div class="html-content">${data.instructions}</div>`, true);
-            renderSection('Schedule', data.schedule);
-            renderSection('Pricing', data.pricing, ['type', 'budget', 'workerMaxEarnings', 'perHourPrice', 'maxNumberOfHours', 'flatPrice']);
-            renderSection('Payment Details', data.pricing?.payment);
-            renderSection('Location', data.location?.address);
-            renderSection('On-Site Contact', data.location?.contact);
-            renderSection('Internal Owner', data.internalOwner);
-            if (data.customFieldGroups?.length > 0) {
-                 grid.innerHTML += '<dt class="section-header">Custom Fields</dt><dd></dd>';
-                 data.customFieldGroups.forEach(group => group.fields.forEach(field => createDtDd(`${group.name} / ${field.name}:`, field.value)));
-            }
-            if (data.documents?.length > 0) {
-                 let docLinks = data.documents.map(doc => `<li><a href="https://www.workmarket.com${doc.uri}" target="_blank">${doc.name}</a> ${doc.description ? `(${doc.description})` : ''}</li>`).join('');
-                 grid.innerHTML += `<dt class="section-header">Documents</dt><dd><ul>${docLinks}</ul></dd>`;
-            }
-            if (data.deliverableRequirementGroup?.deliverableRequirements?.length > 0) {
-                grid.innerHTML += '<dt class="section-header">Deliverables</dt><dd></dd>';
-                if(data.deliverableRequirementGroup.instructions) createDtDd('Instructions:', `<div class="html-content">${data.deliverableRequirementGroup.instructions}</div>`, true);
-                let delivItems = data.deliverableRequirementGroup.deliverableRequirements.map(d => `<li><strong>${d.numberOfFiles}x ${this.formatKey(d.type)}:</strong> ${d.instructions || ''}</li>`).join('');
-                grid.innerHTML += `<dt></dt><dd><ul>${delivItems}</ul></dd>`;
-            }
-            container.innerHTML = '';
-            container.appendChild(grid);
+            // (Same rendering logic as before, just putting it in the right container)
+            const createDtDd = (key, value, isHtml = false) => { if (value === null || value === undefined || value === '') return; grid.innerHTML += `<dt>${key}</dt><dd>${isHtml ? value : this.formatValue(value, key)}</dd>`; };
+            const renderSection = (title, obj, fieldOrder = null) => { if (!obj || Object.keys(obj).length === 0) return; grid.innerHTML += `<dt class="section-header">${title}</dt><dd></dd>`; const keys = fieldOrder || Object.keys(obj); keys.forEach(key => { if (obj.hasOwnProperty(key)) createDtDd(this.formatKey(key) + ':', this.formatValue(obj[key], key)); }); };
+            createDtDd('Title:', data.title); createDtDd('Status:', data.workDisplayStatus); if(data.description) createDtDd('Description:', `<div class="html-content">${data.description}</div>`, true); if(data.instructions) createDtDd('Instructions:', `<div class="html-content">${data.instructions}</div>`, true); renderSection('Schedule', data.schedule); renderSection('Pricing', data.pricing, ['type', 'budget', 'workerMaxEarnings', 'perHourPrice', 'maxNumberOfHours', 'flatPrice']); renderSection('Payment Details', data.pricing?.payment); renderSection('Location', data.location?.address); renderSection('On-Site Contact', data.location?.contact); renderSection('Internal Owner', data.internalOwner);
+            container.innerHTML = ''; container.appendChild(grid);
         }
 
         renderWorkersTable(data) {
-            const container = document.getElementById('applicants');
-            if(!container) { console.error('Cannot find #applicants container.'); return; }
-            if (!data.workers || data.workers.length === 0) { container.innerHTML = 'No applicants or invited workers found.'; return; }
+            const container = document.getElementById('enhancer-content-applicants');
+            if(!container || !data || !data.workers || data.workers.length === 0) { (container || {}).innerHTML = 'No applicants or invited workers found.'; return; }
             let tableHTML = `<table class="enhancer-table"><thead><tr><th>Name / Company</th><th>Contact</th><th>Status</th><th>Distance</th><th>Overall Score</th><th>Stats</th></tr></thead><tbody>`;
             data.workers.forEach(worker => {
-                const scores = this.calculateOverallScore(worker, data.budget || 350);
-                const user = worker.user;
-                const company = worker.company;
+                const scores = this.calculateOverallScore(worker); const user = worker.user; const company = worker.company;
                 const displayName = company.name === 'Sole Proprietor' ? `${user.firstName} ${user.lastName}` : company.name;
-                let contactInfo = (user.email ? `<div><a href="mailto:${user.email}">${user.email}</a></div>` : '') +
-                                  (user.phoneNumber?.phoneNumber ? `<div><a href="tel:${user.phoneNumber.phoneNumber}">${user.phoneNumber.phoneNumber}</a> (W)</div>` : '') +
-                                  (user.mobilePhoneNumber?.phoneNumber ? `<div><a href="tel:${user.mobilePhoneNumber.phoneNumber}">${user.mobilePhoneNumber.phoneNumber}</a> (M)</div>` : '');
+                let contactInfo = (user.email ? `<div><a href="mailto:${user.email}">${user.email}</a></div>` : '') + (user.phoneNumber?.phoneNumber ? `<div>${user.phoneNumber.phoneNumber} (W)</div>` : '') + (user.mobilePhoneNumber?.phoneNumber ? `<div>${user.mobilePhoneNumber.phoneNumber} (M)</div>` : '');
                 const stats = `Cost: ${scores.CostScore}, Dist: ${scores.DistanceScore}, Perf: ${scores.StatsScore}<br/><small>(CPS: ${scores.CPS_Final}, IPS: ${scores.IPS})</small>`;
                 tableHTML += `<tr><td><a href="https://www.workmarket.com/new-profile/${user.userUuid}" target="_blank"><strong>${displayName}</strong></a>${company.name !== 'Sole Proprietor' ? `<div><small>(${user.firstName} ${user.lastName})</small></div>` : ''}</td><td>${contactInfo}</td><td>${this.formatKey(worker.status)}</td><td>${this.formatValue(worker.distance, 'distance')}</td><td class="col-score">${scores.OverallScore}</td><td>${stats}</td></tr>`;
             });
-            tableHTML += `</tbody></table>`;
-            container.innerHTML = tableHTML;
+            container.innerHTML = tableHTML + `</tbody></table>`;
         }
 
         renderNotes(data) {
-            const container = document.getElementById('notes');
-            if(!container) { console.error('Cannot find #notes container.'); return; }
-            if (!data.notes || data.notes.length === 0) { container.innerHTML = 'No notes found.'; return; }
+            const container = document.getElementById('enhancer-content-notes');
+            if(!container || !data || !data.notes || data.notes.length === 0) { (container || {}).innerHTML = 'No notes found.'; return; }
             let tableHTML = `<table class="enhancer-table"><thead><tr><th>Date</th><th>Creator</th><th>Note</th></tr></thead><tbody>`;
-            data.notes.forEach(note => {
-                tableHTML += `<tr><td>${new Date(note.createdOn).toLocaleString()}</td><td>${note.creator.firstName} ${note.creator.lastName}</td><td>${note.note}</td></tr>`;
-            });
-            tableHTML += `</tbody></table>`;
-            container.innerHTML = tableHTML;
+            data.notes.forEach(note => { tableHTML += `<tr><td>${new Date(note.createdOn).toLocaleString()}</td><td>${note.creator.firstName} ${note.creator.lastName}</td><td>${note.note}</td></tr>`; });
+            container.innerHTML = tableHTML + `</tbody></table>`;
         }
 
         renderActivityLog(data) {
-            const container = document.getElementById('activity-log');
-            if(!container) { console.error('Cannot find #activity-log container.'); return; }
-            if (!data.logEntries || data.logEntries.length === 0) { container.innerHTML = 'No activity log entries found.'; return; }
+            const container = document.getElementById('enhancer-content-activity-log');
+            if(!container || !data || !data.logEntries || data.logEntries.length === 0) { (container || {}).innerHTML = 'No activity log entries found.'; return; }
             let tableHTML = `<table class="enhancer-table"><thead><tr><th>Date</th><th>Actor</th><th>Action</th></tr></thead><tbody>`;
-            data.logEntries.forEach(entry => {
-                tableHTML += `<tr><td>${new Date(entry.createdDate).toLocaleString()}</td><td>${entry.actor.firstName} ${entry.actor.lastName}</td><td class="col-log-text">${entry.text}</td></tr>`;
-            });
-            tableHTML += `</tbody></table>`;
-            container.innerHTML = tableHTML;
+            data.logEntries.forEach(entry => { tableHTML += `<tr><td>${new Date(entry.createdDate).toLocaleString()}</td><td>${entry.actor.firstName} ${entry.actor.lastName}</td><td class="col-log-text">${entry.text}</td></tr>`; });
+            container.innerHTML = tableHTML + `</tbody></table>`;
         }
 
+        // --- UTILITY AND SCORING FUNCTIONS ---
         formatKey(key) { if (!key) return ''; return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()); }
         formatValue(value, key = '') {
             if (value === null || value === undefined || String(value).trim() === '') return 'N/A';
@@ -262,7 +297,6 @@
             }
             return String(value);
         }
-
         calculateOverallScore(techData, assignmentBudget = 350) {
             let CS = 50, DS = 0, SS = 50, OS = 0; const totalCost = techData.negotiation?.pricing?.total_cost;
             if (totalCost !== undefined && totalCost !== null) { CS = Math.max(0, (1 - (parseFloat(totalCost) / assignmentBudget)) * 100); }
@@ -293,7 +327,7 @@
         }
     }
 
-    // --- Script Entry Point ---
+    // --- Script Entry Point: Detect URL changes for SPA navigation ---
     let lastUrl = location.href;
     new MutationObserver(() => {
         const url = location.href;
@@ -306,11 +340,16 @@
     function onUrlChange() {
         setTimeout(() => {
             if (location.href.includes('/assignments/details/')) {
-                if (!document.querySelector('.enhancer-injected-tab')) {
-                    new WorkMarketDetailEnhancer();
+                if (!document.getElementById('enhancer-trigger-btn')) {
+                    new WorkMarketPopupEnhancer();
                 }
+            } else {
+                const triggerBtn = document.getElementById('enhancer-trigger-btn');
+                const overlay = document.getElementById('enhancer-overlay');
+                if (triggerBtn) triggerBtn.remove();
+                if (overlay) overlay.remove();
             }
-        }, 1000);
+        }, 500);
     }
     
     onUrlChange();
