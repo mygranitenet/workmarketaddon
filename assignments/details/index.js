@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WorkMarket - Enhanced Assignment Details
 // @namespace    http://tampermonkey.net/
-// @version      2.3
+// @version      2.4
 // @description  Fetches detailed assignment, worker, notes, and log data from v3 APIs and displays it in new tabs on the assignment details page.
 // @author       ilakskills
 // @match        https://www.workmarket.com/assignments/details/*
@@ -10,12 +10,15 @@
 
 (async function() {
     'use strict';
-    const SCRIPT_PREFIX = '[WM DETAIL ENHANCER V2.3]';
+    const SCRIPT_PREFIX = '[WM DETAIL ENHANCER V2.4]';
     console.log(`${SCRIPT_PREFIX} Script starting...`);
 
+    // --- Custom CSS for new tabs and content ---
     const customCss = `
         /* Tab and Content Styling */
         .enhancer-tab-content { padding: 15px; background-color: #fff; }
+        .wm-tab--content:not(.-active) { display: none; } /* Ensure only active tab is shown */
+
         .enhancer-loading { font-style: italic; color: #888; padding: 20px; text-align: center; font-size: 1.2em; }
         .enhancer-error { color: #d9534f; font-weight: bold; }
 
@@ -59,16 +62,13 @@
         }
 
         injectUI() {
-            // Correct selectors based on the provided HTML source
             const tabContainer = document.querySelector('ul.wm-tabs');
-            const tabContentContainer = document.querySelector('div.content'); // This is the parent of all tab panes
-
+            const tabContentContainer = document.querySelector('div.content');
             if (!tabContainer || !tabContentContainer) {
                 console.error(`${SCRIPT_PREFIX} Could not find tab containers (ul.wm-tabs / div.content). Cannot inject UI.`);
                 return;
             }
 
-            // Clean up old tabs if the script re-runs on navigation
             tabContainer.querySelectorAll('.enhancer-injected-tab').forEach(el => el.remove());
             tabContentContainer.querySelectorAll('.enhancer-tab-content').forEach(el => el.remove());
 
@@ -80,55 +80,46 @@
             ];
 
             tabInfo.forEach((tab) => {
-                // Create Tab
                 const li = document.createElement('li');
-                li.className = 'wm-tab enhancer-injected-tab'; // Use same class as existing tabs
+                li.className = 'wm-tab enhancer-injected-tab';
                 li.dataset.content = `#${tab.id}`;
                 li.textContent = tab.label;
                 tabContainer.appendChild(li);
 
-                // Create Content Pane
                 const pane = document.createElement('div');
                 pane.id = tab.id;
-                pane.className = 'wm-tab--content enhancer-tab-content'; // Use same class as existing panes
+                pane.className = 'wm-tab--content enhancer-tab-content';
                 pane.innerHTML = `<div class="enhancer-loading">Loading ${tab.label}...</div>`;
                 tabContentContainer.appendChild(pane);
             });
 
-            // Re-initialize the tab functionality from the site's own scripts if necessary
-            // This is a common pattern for sites that initialize JS widgets.
-            if (window.jQuery && window.jQuery.fn.wmTabs) {
-                 $(tabContainer).wmTabs();
-            } else {
-                console.warn(`${SCRIPT_PREFIX} window.jQuery.fn.wmTabs not found. Manual click handlers may be needed if tabs don't work.`);
-                 // Fallback simple click handler if their script doesn't re-run
-                 tabContainer.addEventListener('click', (e) => {
-                     if(e.target.matches('.wm-tab')) {
-                         tabContainer.querySelectorAll('.wm-tab').forEach(t => t.classList.remove('-active'));
-                         tabContentContainer.querySelectorAll('.wm-tab--content').forEach(c => c.classList.remove('-active'));
-                         e.target.classList.add('-active');
-                         const contentId = e.target.dataset.content;
-                         if(contentId) {
-                           const contentPane = tabContentContainer.querySelector(contentId);
-                           if (contentPane) contentPane.classList.add('-active');
-                         }
-                     }
-                 });
-            }
+            // Re-initialize or delegate tab click events
+            tabContainer.addEventListener('click', (e) => {
+                const clickedTab = e.target.closest('.wm-tab');
+                if (!clickedTab) return;
+                
+                const targetContentSelector = clickedTab.dataset.content;
+                if (!targetContentSelector) return;
 
-             GM_addStyle(customCss);
-             console.log(`${SCRIPT_PREFIX} UI injected successfully.`);
+                // Deactivate all tabs and content
+                tabContainer.querySelectorAll('.wm-tab').forEach(t => t.classList.remove('-active'));
+                tabContentContainer.querySelectorAll('.wm-tab--content').forEach(c => c.classList.remove('-active'));
+                
+                // Activate the clicked one
+                clickedTab.classList.add('-active');
+                const contentPane = tabContentContainer.querySelector(targetContentSelector);
+                if (contentPane) contentPane.classList.add('-active');
+            });
+
+            GM_addStyle(customCss);
+            console.log(`${SCRIPT_PREFIX} UI injected successfully.`);
         }
 
         async apiPostRequest(endpoint, payload) {
             const url = `https://www.workmarket.com${endpoint}`;
             const response = await fetch(url, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json, text/plain, */*',
-                    'X-Requested-With': 'XMLHttpRequest'
-                },
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/plain, */*', 'X-Requested-With': 'XMLHttpRequest' },
                 body: JSON.stringify(payload)
             });
             if (!response.ok) throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
@@ -150,12 +141,8 @@
             const results = await Promise.all(requests);
             results.forEach(result => {
                 if (result.status === 'fulfilled') {
-                    console.log(`${SCRIPT_PREFIX} Successfully fetched data for: ${result.key}`, result.value);
                     const payload = result.value.result?.payload?.[0];
-                    if (!payload) {
-                        this.renderError(result.key, 'No payload in API response.');
-                        return;
-                    }
+                    if (!payload) { this.renderError(result.key, 'No payload in API response.'); return; }
                     switch (result.key) {
                         case 'details': this.renderAssignmentDetails(payload); break;
                         case 'workers': this.renderWorkersTable(payload); break;
@@ -170,47 +157,25 @@
         }
 
         renderError(tabKey, errorMessage) {
-            let paneId = '';
-            if (tabKey === 'details') paneId = 'enhanced-details';
-            else if (tabKey === 'workers') paneId = 'applicants';
-            else if (tabKey === 'log') paneId = 'activity-log';
-            else paneId = tabKey;
+            let paneId = tabKey === 'details' ? 'enhanced-details' : tabKey === 'workers' ? 'applicants' : tabKey === 'log' ? 'activity-log' : tabKey;
             const pane = document.getElementById(paneId);
             if (pane) pane.innerHTML = `<div class="enhancer-error">Error loading data: ${errorMessage}</div>`;
         }
 
-        // --- RENDER FUNCTIONS (No changes needed below this line) ---
         renderAssignmentDetails(data) {
             const container = document.getElementById('enhanced-details');
-            if(!container) { console.error('Cannot find #enhanced-details container to render into.'); return; }
+            if(!container) { console.error('Cannot find #enhanced-details container.'); return; }
             const grid = document.createElement('dl');
             grid.className = 'enhancer-grid';
             const createDtDd = (key, value, isHtml = false) => {
                 if (value === null || value === undefined || value === '') return;
-                const dt = document.createElement('dt');
-                dt.textContent = key;
-                const dd = document.createElement('dd');
-                if (isHtml) dd.innerHTML = value;
-                else dd.textContent = value;
-                grid.appendChild(dt); grid.appendChild(dd);
+                grid.innerHTML += `<dt>${key}</dt><dd>${isHtml ? value : this.formatValue(value, key)}</dd>`;
             };
             const renderSection = (title, obj, fieldOrder = null) => {
                 if (!obj || Object.keys(obj).length === 0) return;
-                const header = document.createElement('dt');
-                header.className = 'section-header';
-                header.textContent = title;
-                grid.appendChild(header);
+                grid.innerHTML += `<dt class="section-header">${title}</dt><dd></dd>`;
                 const keys = fieldOrder || Object.keys(obj);
-                keys.forEach(key => {
-                    if (obj.hasOwnProperty(key)) {
-                        let value = obj[key];
-                        if(typeof value === 'object' && value !== null) {
-                            renderSection(this.formatKey(key), value);
-                        } else {
-                            createDtDd(this.formatKey(key) + ':', this.formatValue(value, key));
-                        }
-                    }
-                });
+                keys.forEach(key => { if (obj.hasOwnProperty(key)) createDtDd(this.formatKey(key) + ':', this.formatValue(obj[key], key)); });
             };
             createDtDd('Title:', data.title);
             createDtDd('Status:', data.workDisplayStatus);
@@ -223,21 +188,18 @@
             renderSection('On-Site Contact', data.location?.contact);
             renderSection('Internal Owner', data.internalOwner);
             if (data.customFieldGroups?.length > 0) {
-                 const header = document.createElement('dt'); header.className = 'section-header'; header.textContent = 'Custom Fields'; grid.appendChild(header);
+                 grid.innerHTML += '<dt class="section-header">Custom Fields</dt><dd></dd>';
                  data.customFieldGroups.forEach(group => group.fields.forEach(field => createDtDd(`${group.name} / ${field.name}:`, field.value)));
             }
             if (data.documents?.length > 0) {
-                 const header = document.createElement('dt'); header.className = 'section-header'; header.textContent = 'Documents'; grid.appendChild(header);
-                 const ul = document.createElement('ul');
-                 data.documents.forEach(doc => ul.innerHTML += `<li><a href="https://www.workmarket.com${doc.uri}" target="_blank">${doc.name}</a> ${doc.description ? `(${doc.description})` : ''}</li>`);
-                 const dd = document.createElement('dd'); dd.appendChild(ul); grid.appendChild(dd);
+                 let docLinks = data.documents.map(doc => `<li><a href="https://www.workmarket.com${doc.uri}" target="_blank">${doc.name}</a> ${doc.description ? `(${doc.description})` : ''}</li>`).join('');
+                 grid.innerHTML += `<dt class="section-header">Documents</dt><dd><ul>${docLinks}</ul></dd>`;
             }
             if (data.deliverableRequirementGroup?.deliverableRequirements?.length > 0) {
-                const header = document.createElement('dt'); header.className = 'section-header'; header.textContent = 'Deliverables'; grid.appendChild(header);
+                grid.innerHTML += '<dt class="section-header">Deliverables</dt><dd></dd>';
                 if(data.deliverableRequirementGroup.instructions) createDtDd('Instructions:', `<div class="html-content">${data.deliverableRequirementGroup.instructions}</div>`, true);
-                const ul = document.createElement('ul');
-                data.deliverableRequirementGroup.deliverableRequirements.forEach(d => ul.innerHTML += `<li><strong>${d.numberOfFiles}x ${this.formatKey(d.type)}:</strong> ${d.instructions || ''}</li>`);
-                const dd = document.createElement('dd'); dd.appendChild(ul); grid.appendChild(dd);
+                let delivItems = data.deliverableRequirementGroup.deliverableRequirements.map(d => `<li><strong>${d.numberOfFiles}x ${this.formatKey(d.type)}:</strong> ${d.instructions || ''}</li>`).join('');
+                grid.innerHTML += `<dt></dt><dd><ul>${delivItems}</ul></dd>`;
             }
             container.innerHTML = '';
             container.appendChild(grid);
@@ -245,68 +207,46 @@
 
         renderWorkersTable(data) {
             const container = document.getElementById('applicants');
-            if(!container) { console.error('Cannot find #applicants container to render into.'); return; }
-            if (!data.workers || data.workers.length === 0) {
-                container.innerHTML = 'No applicants or invited workers found.';
-                return;
-            }
-            const table = document.createElement('table');
-            table.className = 'enhancer-table';
-            table.innerHTML = `<thead><tr><th>Name / Company</th><th>Contact</th><th>Status</th><th>Distance</th><th>Overall Score</th><th>Stats</th></tr></thead>`;
-            const tbody = document.createElement('tbody');
+            if(!container) { console.error('Cannot find #applicants container.'); return; }
+            if (!data.workers || data.workers.length === 0) { container.innerHTML = 'No applicants or invited workers found.'; return; }
+            let tableHTML = `<table class="enhancer-table"><thead><tr><th>Name / Company</th><th>Contact</th><th>Status</th><th>Distance</th><th>Overall Score</th><th>Stats</th></tr></thead><tbody>`;
             data.workers.forEach(worker => {
-                const tr = document.createElement('tr');
                 const scores = this.calculateOverallScore(worker, data.budget || 350);
                 const user = worker.user;
                 const company = worker.company;
-                const displayName = company.name === 'Sole Proprietor' ? user.firstName + ' ' + user.lastName : company.name;
-                let contactInfo = '';
-                if(user.email) contactInfo += `<div><a href="mailto:${user.email}">${user.email}</a></div>`;
-                if(user.phoneNumber?.phoneNumber) contactInfo += `<div><a href="tel:${user.phoneNumber.phoneNumber}">${user.phoneNumber.phoneNumber}</a> (Work)</div>`;
-                if(user.mobilePhoneNumber?.phoneNumber) contactInfo += `<div><a href="tel:${user.mobilePhoneNumber.phoneNumber}">${user.mobilePhoneNumber.phoneNumber}</a> (Mobile)</div>`;
+                const displayName = company.name === 'Sole Proprietor' ? `${user.firstName} ${user.lastName}` : company.name;
+                let contactInfo = (user.email ? `<div><a href="mailto:${user.email}">${user.email}</a></div>` : '') +
+                                  (user.phoneNumber?.phoneNumber ? `<div><a href="tel:${user.phoneNumber.phoneNumber}">${user.phoneNumber.phoneNumber}</a> (W)</div>` : '') +
+                                  (user.mobilePhoneNumber?.phoneNumber ? `<div><a href="tel:${user.mobilePhoneNumber.phoneNumber}">${user.mobilePhoneNumber.phoneNumber}</a> (M)</div>` : '');
                 const stats = `Cost: ${scores.CostScore}, Dist: ${scores.DistanceScore}, Perf: ${scores.StatsScore}<br/><small>(CPS: ${scores.CPS_Final}, IPS: ${scores.IPS})</small>`;
-                tr.innerHTML = `<td><a href="https://www.workmarket.com/new-profile/${user.userUuid}" target="_blank"><strong>${displayName}</strong></a>${company.name !== 'Sole Proprietor' ? `<div><small>(${user.firstName} ${user.lastName})</small></div>` : ''}</td><td>${contactInfo}</td><td>${this.formatKey(worker.status)}</td><td>${this.formatValue(worker.distance, 'distance')}</td><td class="col-score">${scores.OverallScore}</td><td>${stats}</td>`;
-                tbody.appendChild(tr);
+                tableHTML += `<tr><td><a href="https://www.workmarket.com/new-profile/${user.userUuid}" target="_blank"><strong>${displayName}</strong></a>${company.name !== 'Sole Proprietor' ? `<div><small>(${user.firstName} ${user.lastName})</small></div>` : ''}</td><td>${contactInfo}</td><td>${this.formatKey(worker.status)}</td><td>${this.formatValue(worker.distance, 'distance')}</td><td class="col-score">${scores.OverallScore}</td><td>${stats}</td></tr>`;
             });
-            table.appendChild(tbody);
-            container.innerHTML = '';
-            container.appendChild(table);
+            tableHTML += `</tbody></table>`;
+            container.innerHTML = tableHTML;
         }
 
         renderNotes(data) {
             const container = document.getElementById('notes');
-            if(!container) { console.error('Cannot find #notes container to render into.'); return; }
+            if(!container) { console.error('Cannot find #notes container.'); return; }
             if (!data.notes || data.notes.length === 0) { container.innerHTML = 'No notes found.'; return; }
-            const table = document.createElement('table');
-            table.className = 'enhancer-table';
-            table.innerHTML = `<thead><tr><th>Date</th><th>Creator</th><th>Note</th></tr></thead>`;
-            const tbody = document.createElement('tbody');
+            let tableHTML = `<table class="enhancer-table"><thead><tr><th>Date</th><th>Creator</th><th>Note</th></tr></thead><tbody>`;
             data.notes.forEach(note => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `<td>${new Date(note.createdOn).toLocaleString()}</td><td>${note.creator.firstName} ${note.creator.lastName}</td><td>${note.note}</td>`;
-                tbody.appendChild(tr);
+                tableHTML += `<tr><td>${new Date(note.createdOn).toLocaleString()}</td><td>${note.creator.firstName} ${note.creator.lastName}</td><td>${note.note}</td></tr>`;
             });
-            table.appendChild(tbody);
-            container.innerHTML = '';
-            container.appendChild(table);
+            tableHTML += `</tbody></table>`;
+            container.innerHTML = tableHTML;
         }
 
         renderActivityLog(data) {
             const container = document.getElementById('activity-log');
-            if(!container) { console.error('Cannot find #activity-log container to render into.'); return; }
+            if(!container) { console.error('Cannot find #activity-log container.'); return; }
             if (!data.logEntries || data.logEntries.length === 0) { container.innerHTML = 'No activity log entries found.'; return; }
-            const table = document.createElement('table');
-            table.className = 'enhancer-table';
-            table.innerHTML = `<thead><tr><th>Date</th><th>Actor</th><th>Action</th></tr></thead>`;
-            const tbody = document.createElement('tbody');
+            let tableHTML = `<table class="enhancer-table"><thead><tr><th>Date</th><th>Actor</th><th>Action</th></tr></thead><tbody>`;
             data.logEntries.forEach(entry => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `<td>${new Date(entry.createdDate).toLocaleString()}</td><td>${entry.actor.firstName} ${entry.actor.lastName}</td><td class="col-log-text">${entry.text}</td>`;
-                tbody.appendChild(tr);
+                tableHTML += `<tr><td>${new Date(entry.createdDate).toLocaleString()}</td><td>${entry.actor.firstName} ${entry.actor.lastName}</td><td class="col-log-text">${entry.text}</td></tr>`;
             });
-            table.appendChild(tbody);
-            container.innerHTML = '';
-            container.appendChild(table);
+            tableHTML += `</tbody></table>`;
+            container.innerHTML = tableHTML;
         }
 
         formatKey(key) { if (!key) return ''; return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()); }
@@ -322,14 +262,13 @@
             }
             return String(value);
         }
+
         calculateOverallScore(techData, assignmentBudget = 350) {
-            let CS = 50, DS = 0, SS = 50, OS = 0;
-            const totalCost = techData.negotiation?.pricing?.total_cost;
+            let CS = 50, DS = 0, SS = 50, OS = 0; const totalCost = techData.negotiation?.pricing?.total_cost;
             if (totalCost !== undefined && totalCost !== null) { CS = Math.max(0, (1 - (parseFloat(totalCost) / assignmentBudget)) * 100); }
             const distance = techData.distance;
             if (distance !== undefined && distance !== null) {
-                if (distance <= 40) DS = Math.max(0, (1 - (distance / 80)) * 100);
-                else if (distance <= 60) DS = 20; else if (distance <= 80) DS = 10; else DS = 0;
+                if (distance <= 40) DS = Math.max(0, (1 - (distance / 80)) * 100); else if (distance <= 60) DS = 20; else if (distance <= 80) DS = 10; else DS = 0;
             }
             let CPS_Final = 50; const rscCompany = techData.resourceCompanyScoreCard?.scores; const rscIndividual = techData.resourceScoreCard;
             if (rscCompany) {
@@ -367,7 +306,6 @@
     function onUrlChange() {
         setTimeout(() => {
             if (location.href.includes('/assignments/details/')) {
-                // Check if our specific tabs haven't been injected yet to avoid re-running
                 if (!document.querySelector('.enhancer-injected-tab')) {
                     new WorkMarketDetailEnhancer();
                 }
@@ -375,7 +313,6 @@
         }, 1000);
     }
     
-    // Initial run on page load
     onUrlChange();
 
 })();
