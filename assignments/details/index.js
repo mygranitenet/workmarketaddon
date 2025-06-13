@@ -1,17 +1,27 @@
 // ==UserScript==
 // @name         WorkMarket - Pop-up Detail Enhancer
 // @namespace    http://tampermonkey.net/
-// @version      3.0
+// @version      3.1
 // @description  Adds a button to show a pop-up modal with detailed assignment, worker, notes, and log data.
 // @author       ilakskills
 // @match        https://www.workmarket.com/assignments/details/*
-// @grant        GM_addStyle
+// @grant        none
 // ==/UserScript==
 
 (async function() {
     'use strict';
-    const SCRIPT_PREFIX = '[WM POPUP ENHANCER V3.0]';
+    const SCRIPT_PREFIX = '[WM POPUP ENHANCER V3.1]';
     console.log(`${SCRIPT_PREFIX} Script starting...`);
+
+    // --- Helper function to inject CSS without GM_addStyle ---
+    function addGlobalStyle(css) {
+        const head = document.head || document.getElementsByTagName('head')[0];
+        if (!head) { return; }
+        const style = document.createElement('style');
+        style.type = 'text/css';
+        style.innerHTML = css;
+        head.appendChild(style);
+    }
 
     // --- CSS for the trigger button and the pop-up modal ---
     const customCss = `
@@ -45,7 +55,7 @@
         }
         .enhancer-header h3 { margin: 0; font-size: 1.1rem; }
         .enhancer-close-btn { background: none; border: none; color: white; font-size: 24px; cursor: pointer; line-height: 1; }
-        
+
         .enhancer-nav { display: flex; background-color: #e9ecef; border-bottom: 1px solid #ccc; flex-shrink: 0; }
         .enhancer-nav button { background: none; border: none; padding: 10px 15px; cursor: pointer; font-size: 14px; font-weight: 500; color: #495057; border-bottom: 3px solid transparent; }
         .enhancer-nav button:hover { background-color: #dde2e6; }
@@ -90,16 +100,15 @@
         }
 
         injectUI() {
-            GM_addStyle(customCss);
+            // Use our new helper function instead of GM_addStyle
+            addGlobalStyle(customCss);
 
-            // Create Trigger Button
             const triggerBtn = document.createElement('button');
             triggerBtn.id = 'enhancer-trigger-btn';
-            triggerBtn.innerHTML = ''; // Package icon
+            triggerBtn.innerHTML = '';
             triggerBtn.title = 'Show Enhanced Details';
             document.body.appendChild(triggerBtn);
 
-            // Create Modal Structure
             const overlay = document.createElement('div');
             overlay.id = 'enhancer-overlay';
             overlay.className = 'enhancer-overlay';
@@ -115,12 +124,10 @@
             `;
             document.body.appendChild(overlay);
 
-            // Add Event Listeners
             triggerBtn.addEventListener('click', () => this.showModal());
             overlay.querySelector('.enhancer-close-btn').addEventListener('click', () => this.hideModal());
             overlay.addEventListener('click', (e) => { if (e.target === overlay) this.hideModal(); });
 
-            // Dragging logic
             const modal = overlay.querySelector('#enhancer-modal');
             const header = overlay.querySelector('#enhancer-header');
             header.addEventListener('mousedown', (e) => {
@@ -227,7 +234,6 @@
                 contentContainer.innerHTML = ''; // Clear loading message
                 this.setupTabsAndFetchData(); // Re-setup tabs and panes
 
-                // Render content into the newly created panes
                 this.renderAssignmentDetails(this.dataCache.details);
                 this.renderWorkersTable(this.dataCache.workers);
                 this.renderNotes(this.dataCache.notes);
@@ -239,17 +245,17 @@
             }
         }
         
-        // --- RENDER FUNCTIONS ---
-        // These now target the panes inside the modal
         renderAssignmentDetails(data) {
             const container = document.getElementById('enhancer-content-details');
-            if(!container || !data) { container.innerHTML = '<div class="enhancer-error">Could not load assignment details.</div>'; return; }
+            if(!container || !data) { (container || {}).innerHTML = '<div class="enhancer-error">Could not load assignment details.</div>'; return; }
             const grid = document.createElement('dl');
             grid.className = 'enhancer-grid';
-            // (Same rendering logic as before, just putting it in the right container)
             const createDtDd = (key, value, isHtml = false) => { if (value === null || value === undefined || value === '') return; grid.innerHTML += `<dt>${key}</dt><dd>${isHtml ? value : this.formatValue(value, key)}</dd>`; };
             const renderSection = (title, obj, fieldOrder = null) => { if (!obj || Object.keys(obj).length === 0) return; grid.innerHTML += `<dt class="section-header">${title}</dt><dd></dd>`; const keys = fieldOrder || Object.keys(obj); keys.forEach(key => { if (obj.hasOwnProperty(key)) createDtDd(this.formatKey(key) + ':', this.formatValue(obj[key], key)); }); };
             createDtDd('Title:', data.title); createDtDd('Status:', data.workDisplayStatus); if(data.description) createDtDd('Description:', `<div class="html-content">${data.description}</div>`, true); if(data.instructions) createDtDd('Instructions:', `<div class="html-content">${data.instructions}</div>`, true); renderSection('Schedule', data.schedule); renderSection('Pricing', data.pricing, ['type', 'budget', 'workerMaxEarnings', 'perHourPrice', 'maxNumberOfHours', 'flatPrice']); renderSection('Payment Details', data.pricing?.payment); renderSection('Location', data.location?.address); renderSection('On-Site Contact', data.location?.contact); renderSection('Internal Owner', data.internalOwner);
+            if (data.customFieldGroups?.length > 0) { grid.innerHTML += '<dt class="section-header">Custom Fields</dt><dd></dd>'; data.customFieldGroups.forEach(group => group.fields.forEach(field => createDtDd(`${group.name} / ${field.name}:`, field.value))); }
+            if (data.documents?.length > 0) { let docLinks = data.documents.map(doc => `<li><a href="https://www.workmarket.com${doc.uri}" target="_blank">${doc.name}</a> ${doc.description ? `(${doc.description})` : ''}</li>`).join(''); grid.innerHTML += `<dt class="section-header">Documents</dt><dd><ul>${docLinks}</ul></dd>`; }
+            if (data.deliverableRequirementGroup?.deliverableRequirements?.length > 0) { grid.innerHTML += '<dt class="section-header">Deliverables</dt><dd></dd>'; if(data.deliverableRequirementGroup.instructions) createDtDd('Instructions:', `<div class="html-content">${data.deliverableRequirementGroup.instructions}</div>`, true); let delivItems = data.deliverableRequirementGroup.deliverableRequirements.map(d => `<li><strong>${d.numberOfFiles}x ${this.formatKey(d.type)}:</strong> ${d.instructions || ''}</li>`).join(''); grid.innerHTML += `<dt></dt><dd><ul>${delivItems}</ul></dd>`; }
             container.innerHTML = ''; container.appendChild(grid);
         }
 
@@ -258,8 +264,7 @@
             if(!container || !data || !data.workers || data.workers.length === 0) { (container || {}).innerHTML = 'No applicants or invited workers found.'; return; }
             let tableHTML = `<table class="enhancer-table"><thead><tr><th>Name / Company</th><th>Contact</th><th>Status</th><th>Distance</th><th>Overall Score</th><th>Stats</th></tr></thead><tbody>`;
             data.workers.forEach(worker => {
-                const scores = this.calculateOverallScore(worker); const user = worker.user; const company = worker.company;
-                const displayName = company.name === 'Sole Proprietor' ? `${user.firstName} ${user.lastName}` : company.name;
+                const scores = this.calculateOverallScore(worker); const user = worker.user; const company = worker.company; const displayName = company.name === 'Sole Proprietor' ? `${user.firstName} ${user.lastName}` : company.name;
                 let contactInfo = (user.email ? `<div><a href="mailto:${user.email}">${user.email}</a></div>` : '') + (user.phoneNumber?.phoneNumber ? `<div>${user.phoneNumber.phoneNumber} (W)</div>` : '') + (user.mobilePhoneNumber?.phoneNumber ? `<div>${user.mobilePhoneNumber.phoneNumber} (M)</div>` : '');
                 const stats = `Cost: ${scores.CostScore}, Dist: ${scores.DistanceScore}, Perf: ${scores.StatsScore}<br/><small>(CPS: ${scores.CPS_Final}, IPS: ${scores.IPS})</small>`;
                 tableHTML += `<tr><td><a href="https://www.workmarket.com/new-profile/${user.userUuid}" target="_blank"><strong>${displayName}</strong></a>${company.name !== 'Sole Proprietor' ? `<div><small>(${user.firstName} ${user.lastName})</small></div>` : ''}</td><td>${contactInfo}</td><td>${this.formatKey(worker.status)}</td><td>${this.formatValue(worker.distance, 'distance')}</td><td class="col-score">${scores.OverallScore}</td><td>${stats}</td></tr>`;
@@ -283,7 +288,6 @@
             container.innerHTML = tableHTML + `</tbody></table>`;
         }
 
-        // --- UTILITY AND SCORING FUNCTIONS ---
         formatKey(key) { if (!key) return ''; return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()); }
         formatValue(value, key = '') {
             if (value === null || value === undefined || String(value).trim() === '') return 'N/A';
@@ -327,7 +331,7 @@
         }
     }
 
-    // --- Script Entry Point: Detect URL changes for SPA navigation ---
+    // --- Script Entry Point ---
     let lastUrl = location.href;
     new MutationObserver(() => {
         const url = location.href;
