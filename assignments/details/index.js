@@ -1,7 +1,8 @@
 // ==UserScript==
-// @name         WorkMarket - Pop-up Detail Enhancer
-// @version      3.3
-// @description  Adds a button to show a pop-up modal with a user-friendly, single-page accordion view of all assignment data.
+// @name         WorkMarket - Assignment Page Redesign
+// @namespace    http://tampermonkey.net/
+// @version      4.0
+// @description  Completely redesigns the assignment details page into a clean, modern dashboard, fetching all relevant data.
 // @author       ilakskills
 // @match        https://www.workmarket.com/assignments/details/*
 // @grant        none
@@ -9,60 +10,67 @@
 
 (async function() {
     'use strict';
-    const SCRIPT_PREFIX = '[WM POPUP ENHANCER V3.3]';
+    const SCRIPT_PREFIX = '[WM REDESIGN V4.0]';
     console.log(`${SCRIPT_PREFIX} Script starting...`);
 
+    // --- Helper function to inject CSS ---
     function addGlobalStyle(css) {
         const head = document.head || document.getElementsByTagName('head')[0];
         if (!head) { return; }
         const style = document.createElement('style');
-        style.type = 'text/css';
+        style.id = 'enhancer-redesign-style';
         style.innerHTML = css;
         head.appendChild(style);
     }
 
+    // --- CSS for the new page layout ---
     const customCss = `
-        #enhancer-trigger-btn { position: fixed; bottom: 20px; right: 20px; z-index: 9998; background-color: #0056b3; color: white; border: none; border-radius: 50%; width: 60px; height: 60px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); cursor: pointer; font-size: 24px; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease-in-out; }
-        #enhancer-trigger-btn:hover { background-color: #007bff; transform: scale(1.1); }
+        /* Hide original content */
+        .page-header, .row_details_assignment { display: none !important; }
 
-        .enhancer-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 9999; display: none; justify-content: center; align-items: center; }
-        .enhancer-modal { position: absolute; background-color: #fff; border-radius: 8px; box-shadow: 0 5px 20px rgba(0,0,0,0.4); width: 90%; max-width: 1200px; height: 85vh; display: flex; flex-direction: column; }
-        .enhancer-header { background-color: #343a40; color: white; padding: 10px 15px; border-top-left-radius: 8px; border-top-right-radius: 8px; display: flex; justify-content: space-between; align-items: center; cursor: move; }
-        .enhancer-header h3 { margin: 0; font-size: 1.1rem; }
-        .enhancer-close-btn { background: none; border: none; color: white; font-size: 24px; cursor: pointer; line-height: 1; }
-
-        .enhancer-main-content { flex-grow: 1; overflow-y: auto; padding: 10px; }
+        /* New Layout Styles */
+        #enhancer-root { padding: 15px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        #enhancer-container { display: flex; gap: 20px; }
+        #enhancer-left-col { width: 320px; flex-shrink: 0; }
+        #enhancer-right-col { flex-grow: 1; min-width: 0; /* Prevents flexbox overflow */ }
         
-        /* Accordion Styles */
-        .enhancer-accordion-item { border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px; overflow: hidden; }
-        .enhancer-accordion-header { background-color: #f7f7f7; color: #333; cursor: pointer; padding: 12px 15px; width: 100%; border: none; text-align: left; font-size: 16px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
-        .enhancer-accordion-header:hover { background-color: #e9e9e9; }
-        .enhancer-accordion-header::after { content: '+'; font-size: 20px; font-weight: bold; transition: transform 0.2s ease-in-out; }
-        .enhancer-accordion-header.active::after { transform: rotate(45deg); }
-        .enhancer-accordion-content { padding: 0 15px; max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out, padding 0.3s ease-out; background: #fff; }
-        .enhancer-accordion-content.active { max-height: 2000px; /* Large enough for content */ padding: 15px; }
+        /* Dashboard Card (Left Column) */
+        .enhancer-card { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .enhancer-card-header { padding: 12px 15px; border-bottom: 1px solid #e9ecef; font-size: 16px; font-weight: 600; color: #343a40; }
+        .enhancer-card-body { padding: 15px; }
 
-        /* General & Table Styles */
-        .enhancer-loading { font-style: italic; color: #888; padding: 20px; text-align: center; font-size: 1.2em; }
-        .enhancer-error { color: #d9534f; font-weight: bold; padding: 20px; }
-        .enhancer-grid { display: grid; grid-template-columns: minmax(180px, max-content) 1fr; gap: 8px 15px; font-size: 0.9em; }
-        .enhancer-grid dt { font-weight: bold; text-align: right; color: #555; }
-        .enhancer-grid dd { word-break: break-word; }
-        .enhancer-table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
-        .enhancer-table thead tr { background-color: #4A5568; color: #ffffff; }
-        .enhancer-table th, .enhancer-table td { padding: 8px; border: 1px solid #ddd; text-align: left; vertical-align: top;}
-        .enhancer-table tbody tr:nth-child(even) { background-color: #f9f9f9; }
+        /* Data Grid for Dashboard */
+        .enhancer-dashboard-grid { display: grid; grid-template-columns: auto 1fr; gap: 10px 10px; align-items: center; }
+        .enhancer-dashboard-grid dt { font-weight: 500; color: #6c757d; text-align: right; }
+        .enhancer-dashboard-grid dd { font-weight: 500; color: #212529; word-break: break-word; }
+        .enhancer-dashboard-grid dd.status { font-weight: 600; padding: 3px 8px; border-radius: 4px; color: #fff; text-align: center; }
+        .enhancer-dashboard-grid dd.status-active { background-color: #28a745; }
+        .enhancer-dashboard-grid dd.status-default { background-color: #6c757d; }
+        .enhancer-dashboard-grid .section-title { grid-column: 1 / -1; font-size: 14px; font-weight: 600; color: #0056b3; margin-top: 10px; padding-bottom: 5px; border-bottom: 2px solid #0056b3; }
+        
+        /* Accordion (Right Column) */
+        .enhancer-accordion-item { border: 1px solid #dee2e6; border-radius: 5px; margin-bottom: 10px; overflow: hidden; }
+        .enhancer-accordion-header { background: #f8f9fa; cursor: pointer; padding: 12px 15px; width: 100%; border: none; text-align: left; font-size: 1rem; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+        .enhancer-accordion-header:hover { background: #e9ecef; }
+        .enhancer-accordion-header::after { content: '+'; font-size: 22px; transition: transform 0.2s; }
+        .enhancer-accordion-header.active::after { transform: rotate(45deg); }
+        .enhancer-accordion-content { padding: 0 15px; max-height: 0; overflow: hidden; transition: all 0.3s ease-in-out; }
+        .enhancer-accordion-content.active { max-height: 5000px; padding: 15px; border-top: 1px solid #dee2e6;}
+
+        /* Universal styles */
+        .enhancer-loading, .enhancer-error { text-align: center; padding: 40px; font-size: 1.2rem; }
+        .enhancer-error { color: #dc3545; }
+        .enhancer-table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+        .enhancer-table thead tr { background-color: #e9ecef; color: #495057; font-weight: 600; }
+        .enhancer-table th, .enhancer-table td { padding: 10px; border: 1px solid #dee2e6; text-align: left; vertical-align: top;}
+        .enhancer-table td a { color: #007bff; }
     `;
 
-    class WorkMarketPopupEnhancer {
+    class PageRedesigner {
         constructor() {
             this.workNumber = this.getWorkNumberFromURL();
             if (!this.workNumber) return;
-            this.dataCache = null;
-            this.isDragging = false;
-            this.dragOffsetX = 0;
-            this.dragOffsetY = 0;
-            this.injectTrigger();
+            this.init();
         }
 
         getWorkNumberFromURL() {
@@ -70,170 +78,179 @@
             return pathParts.pop() || pathParts.pop();
         }
 
-        injectTrigger() {
+        async init() {
+            console.log(`${SCRIPT_PREFIX} Initializing for Work Order #${this.workNumber}`);
+            
+            // Clean up previous instances and inject styles
+            if (document.getElementById('enhancer-redesign-style')) document.getElementById('enhancer-redesign-style').remove();
+            if (document.getElementById('enhancer-root')) document.getElementById('enhancer-root').remove();
             addGlobalStyle(customCss);
-            const triggerBtn = document.createElement('button');
-            triggerBtn.id = 'enhancer-trigger-btn';
-            triggerBtn.innerHTML = '';
-            triggerBtn.title = 'Show Enhanced Details';
-            document.body.appendChild(triggerBtn);
-            triggerBtn.addEventListener('click', () => this.showModal());
-        }
 
-        injectModal() {
-            const overlay = document.createElement('div');
-            overlay.id = 'enhancer-overlay';
-            overlay.className = 'enhancer-overlay';
-            overlay.innerHTML = `
-                <div class="enhancer-modal" id="enhancer-modal">
-                    <div class="enhancer-header" id="enhancer-header">
-                        <h3>Enhanced Assignment Details (ID: ${this.workNumber})</h3>
-                        <button class="enhancer-close-btn" title="Close">×</button>
-                    </div>
-                    <div class="enhancer-main-content" id="enhancer-main-content">
-                        <div class="enhancer-loading">Fetching all data...</div>
-                    </div>
-                </div>
-            `;
-            document.body.appendChild(overlay);
-
-            overlay.querySelector('.enhancer-close-btn').addEventListener('click', () => this.hideModal());
-            overlay.addEventListener('click', (e) => { if (e.target === overlay) this.hideModal(); });
-
-            const modal = overlay.querySelector('#enhancer-modal');
-            const header = overlay.querySelector('#enhancer-header');
-            header.addEventListener('mousedown', this.onDragStart);
-        }
-
-        onDragStart = (e) => {
-            this.isDragging = true;
-            const modal = document.getElementById('enhancer-modal');
-            this.dragOffsetX = e.clientX - modal.offsetLeft;
-            this.dragOffsetY = e.clientY - modal.offsetTop;
-            document.addEventListener('mousemove', this.onDrag);
-            document.addEventListener('mouseup', this.onDragEnd);
-        }
-        onDrag = (e) => { if (this.isDragging) { const modal = document.getElementById('enhancer-modal'); modal.style.left = (e.clientX - this.dragOffsetX) + 'px'; modal.style.top = (e.clientY - this.dragOffsetY) + 'px'; }}
-        onDragEnd = () => { this.isDragging = false; document.removeEventListener('mousemove', this.onDrag); document.removeEventListener('mouseup', this.onDragEnd); }
-
-        showModal() {
-            if (!document.getElementById('enhancer-overlay')) {
-                this.injectModal();
+            const anchor = document.querySelector('div.main.container');
+            if (!anchor) {
+                console.error(`${SCRIPT_PREFIX} Main anchor .main.container not found.`);
+                return;
             }
-            document.getElementById('enhancer-overlay').style.display = 'flex';
-            if (!this.dataCache) {
-                this.fetchAllDataAndBuildUI();
-            }
-        }
 
-        hideModal() {
-            const overlay = document.getElementById('enhancer-overlay');
-            if (overlay) overlay.style.display = 'none';
-        }
+            const rootDiv = document.createElement('div');
+            rootDiv.id = 'enhancer-root';
+            rootDiv.innerHTML = `<div class="enhancer-loading">Loading Enhanced Dashboard...</div>`;
+            anchor.prepend(rootDiv);
 
-        async fetchAllDataAndBuildUI() {
-            const endpoints = { details: '/v3/assignment/view', workers: '/v3/assignment-details/view-invited-workers', notes: '/v3/assignment/view-notes', log: '/v3/assignment-details/view-activity-log' };
             try {
-                const results = await Promise.all(Object.values(endpoints).map(ep => this.apiPostRequest(ep, { workNumber: this.workNumber })));
-                this.dataCache = {
-                    details: results[0].result?.payload?.[0], workers: results[1].result?.payload?.[0],
-                    notes: results[2].result?.payload?.[0], log: results[3].result?.payload?.[0]
-                };
-                this.buildAccordionUI();
+                const data = await this.fetchAllData();
+                this.render(data);
             } catch (error) {
-                console.error(`${SCRIPT_PREFIX} Failed to fetch data:`, error);
-                document.getElementById('enhancer-main-content').innerHTML = `<div class="enhancer-error">Failed to fetch data: ${error.message}</div>`;
+                rootDiv.innerHTML = `<div class="enhancer-error">Failed to load data: ${error.message}</div>`;
+                console.error(`${SCRIPT_PREFIX} Error during fetch:`, error);
             }
         }
-        
-        buildAccordionUI() {
-            const mainContainer = document.getElementById('enhancer-main-content');
-            mainContainer.innerHTML = ''; // Clear loading message
 
-            const sectionInfo = [
-                { id: 'details', label: 'Assignment Details', renderer: this.renderAssignmentDetails, data: this.dataCache.details, active: true },
-                { id: 'applicants', label: `Applicants (${this.dataCache.workers?.workers?.length || 0})`, renderer: this.renderWorkersTable, data: this.dataCache.workers, active: true },
-                { id: 'notes', label: `Notes (${this.dataCache.notes?.notes?.length || 0})`, renderer: this.renderNotes, data: this.dataCache.notes, active: false },
-                { id: 'activity-log', label: `Activity Log (${this.dataCache.log?.logEntries?.length || 0})`, renderer: this.renderActivityLog, data: this.dataCache.log, active: false }
-            ];
-
-            sectionInfo.forEach(section => {
-                const item = document.createElement('div');
-                item.className = 'enhancer-accordion-item';
-
-                const header = document.createElement('button');
-                header.className = 'enhancer-accordion-header';
-                header.textContent = section.label;
-
-                const content = document.createElement('div');
-                content.className = 'enhancer-accordion-content';
-
-                item.appendChild(header);
-                item.appendChild(content);
-                mainContainer.appendChild(item);
-
-                // Render content immediately
-                section.renderer.call(this, section.data, content);
-
-                if (section.active) {
-                    header.classList.add('active');
-                    content.classList.add('active');
-                }
-
-                header.addEventListener('click', () => {
-                    header.classList.toggle('active');
-                    content.classList.toggle('active');
-                });
-            });
+        async fetchAllData() {
+            const endpoints = { details: '/v3/assignment/view', workers: '/v3/assignment-details/view-invited-workers', notes: '/v3/assignment/view-notes', log: '/v3/assignment-details/view-activity-log' };
+            const requests = Object.values(endpoints).map(ep => this.apiPostRequest(ep, { workNumber: this.workNumber }));
+            const results = await Promise.all(requests);
+            return {
+                details: results[0].result?.payload?.[0], workers: results[1].result?.payload?.[0],
+                notes: results[2].result?.payload?.[0], log: results[3].result?.payload?.[0]
+            };
         }
-        
+
         async apiPostRequest(endpoint, payload) {
             const url = `https://www.workmarket.com${endpoint}`;
-            const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/plain, */*', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify(payload) });
-            if (!response.ok) throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
+            const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, body: JSON.stringify(payload) });
+            if (!response.ok) throw new Error(`API Error on ${endpoint}: ${response.status} ${response.statusText}`);
             return response.json();
         }
 
-        // --- RENDER FUNCTIONS (now accept a container argument) ---
-        renderAssignmentDetails(data, container) {
-            if(!data) { container.innerHTML = '<div class="enhancer-error">No details data.</div>'; return; }
-            const grid = document.createElement('dl'); grid.className = 'enhancer-grid';
-            const createDtDd = (key, value, isHtml = false) => { if (value === null || value === undefined || value === '') return; grid.innerHTML += `<dt>${key}</dt><dd>${isHtml ? value : this.formatValue(value, key)}</dd>`; };
-            createDtDd('Title:', data.title); createDtDd('Status:', data.workDisplayStatus); if(data.description) createDtDd('Description:', `<div class="html-content">${data.description}</div>`, true); if(data.instructions) createDtDd('Instructions:', `<div class="html-content">${data.instructions}</div>`, true);
-            container.appendChild(grid);
+        render(data) {
+            const rootDiv = document.getElementById('enhancer-root');
+            rootDiv.innerHTML = `
+                <div id="enhancer-container">
+                    <div id="enhancer-left-col"></div>
+                    <div id="enhancer-right-col"></div>
+                </div>
+            `;
+            this.renderDashboard(data.details, document.getElementById('enhancer-left-col'));
+            this.renderAccordion(data, document.getElementById('enhancer-right-col'));
         }
 
-        renderWorkersTable(data, container) {
-            if (!data || !data.workers || data.workers.length === 0) { container.innerHTML = 'No applicants found.'; return; }
-            let tableHTML = `<table class="enhancer-table"><thead><tr><th>Name / Company</th><th>Contact</th><th>Status</th><th>Distance</th><th>Overall Score</th><th>Stats</th></tr></thead><tbody>`;
+        renderDashboard(details, container) {
+            if (!details) { container.innerHTML = '<div class="enhancer-error">Details missing.</div>'; return; }
+            const scheduledDate = new Date(details.schedule.from).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+            const scheduledTime = new Date(details.schedule.from).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+            const dashboardHTML = `
+                <div class="enhancer-card">
+                    <div class="enhancer-card-header">${details.title}</div>
+                    <div class="enhancer-card-body">
+                        <dl class="enhancer-dashboard-grid">
+                            <dt>Status:</dt>
+                            <dd class="status status-${details.workStatus}">${details.workDisplayStatus}</dd>
+
+                            <dt class="section-title" colspan="2">Schedule</dt>
+                            <dt>Date:</dt><dd>${scheduledDate}</dd>
+                            <dt>Time:</dt><dd>${scheduledTime} ${details.schedule.timeZone}</dd>
+                            
+                            <dt class="section-title" colspan="2">Location</dt>
+                            <dt>Name:</dt><dd>${details.location.name}</dd>
+                            <dt>Address:</dt><dd>${details.location.address.address1}<br>${details.location.address.city}, ${details.location.address.state} ${details.location.address.zipCode}</dd>
+                            <dt>Contact:</dt><dd>${details.location.contact.firstName} ${details.location.contact.lastName}</dd>
+                            
+                            <dt class="section-title" colspan="2">Payment</dt>
+                            <dt>Rate:</dt><dd>${this.formatValue(details.pricing.perHourPrice || details.pricing.flatPrice || 0, 'cost')} ${details.pricing.type === 'PER_HOUR' ? '/ hr' : '(Flat)'}</dd>
+                            <dt>Budget:</dt><dd>${this.formatValue(details.pricing.budget, 'cost')}</dd>
+                        </dl>
+                    </div>
+                </div>
+            `;
+            container.innerHTML = dashboardHTML;
+        }
+
+        renderAccordion(data, container) {
+             const sections = [
+                { id: 'applicants', label: `Applicants (${data.workers?.workers?.length || 0})`, renderer: this.renderWorkersTable, data: data.workers, active: true },
+                { id: 'notes', label: `Notes (${data.notes?.notes?.length || 0})`, renderer: this.renderNotes, data: data.notes, active: false },
+                { id: 'activity', label: `Activity Log (${data.log?.logEntries?.length || 0})`, renderer: this.renderActivityLog, data: data.log, active: false }
+             ];
+             
+             sections.forEach(section => {
+                 const contentHTML = section.renderer.call(this, section.data);
+                 container.innerHTML += `
+                    <div class="enhancer-accordion-item">
+                        <button class="enhancer-accordion-header ${section.active ? 'active' : ''}">${section.label}</button>
+                        <div class="enhancer-accordion-content ${section.active ? 'active' : ''}">${contentHTML}</div>
+                    </div>
+                 `;
+             });
+             
+             container.querySelectorAll('.enhancer-accordion-header').forEach(header => {
+                 header.addEventListener('click', () => {
+                     header.classList.toggle('active');
+                     header.nextElementSibling.classList.toggle('active');
+                 });
+             });
+        }
+        
+        renderWorkersTable(data) {
+            if (!data || !data.workers || data.workers.length === 0) return 'No applicants found.';
+            let tableHTML = `<table class="enhancer-table"><thead><tr><th>Name/Company</th><th>Status</th><th>Distance</th><th>Overall Score</th></tr></thead><tbody>`;
             data.workers.forEach(worker => {
                 const scores = this.calculateOverallScore(worker); const user = worker.user; const company = worker.company;
                 const displayName = company.name === 'Sole Proprietor' ? `${user.firstName} ${user.lastName}` : company.name;
-                let contactInfo = (user.email ? `<div><a href="mailto:${user.email}">${user.email}</a></div>` : '') + (user.phoneNumber?.phoneNumber ? `<div>${user.phoneNumber.phoneNumber} (W)</div>` : '') + (user.mobilePhoneNumber?.phoneNumber ? `<div>${user.mobilePhoneNumber.phoneNumber} (M)</div>` : '');
-                const stats = `Cost: ${scores.CostScore}, Dist: ${scores.DistanceScore}, Perf: ${scores.StatsScore}<br/><small>(CPS: ${scores.CPS_Final}, IPS: ${scores.IPS})</small>`;
-                tableHTML += `<tr><td><a href="https://www.workmarket.com/new-profile/${user.userUuid}" target="_blank"><strong>${displayName}</strong></a>${company.name !== 'Sole Proprietor' ? `<div><small>(${user.firstName} ${user.lastName})</small></div>` : ''}</td><td>${contactInfo}</td><td>${this.formatKey(worker.status)}</td><td>${this.formatValue(worker.distance, 'distance')}</td><td class="col-score">${scores.OverallScore}</td><td>${stats}</td></tr>`;
+                tableHTML += `<tr><td><a href="/new-profile/${user.userUuid}" target="_blank"><strong>${displayName}</strong></a></td><td>${this.formatKey(worker.status)}</td><td>${this.formatValue(worker.distance, 'distance')}</td><td class="col-score">${scores.OverallScore}</td></tr>`;
             });
-            container.innerHTML = tableHTML + `</tbody></table>`;
-        }
-
-        renderNotes(data, container) {
-            if (!data || !data.notes || data.notes.length === 0) { container.innerHTML = 'No notes found.'; return; }
-            let tableHTML = `<table class="enhancer-table"><thead><tr><th>Date</th><th>Creator</th><th>Note</th></tr></thead><tbody>`;
-            data.notes.forEach(note => { tableHTML += `<tr><td>${new Date(note.createdOn).toLocaleString()}</td><td>${note.creator.firstName} ${note.creator.lastName}</td><td>${note.note}</td></tr>`; });
-            container.innerHTML = tableHTML + `</tbody></table>`;
-        }
-
-        renderActivityLog(data, container) {
-            if (!data || !data.logEntries || data.logEntries.length === 0) { container.innerHTML = 'No activity log entries found.'; return; }
-            let tableHTML = `<table class="enhancer-table"><thead><tr><th>Date</th><th>Actor</th><th>Action</th></tr></thead><tbody>`;
-            data.logEntries.forEach(entry => { tableHTML += `<tr><td>${new Date(entry.createdDate).toLocaleString()}</td><td>${entry.actor.firstName} ${entry.actor.lastName}</td><td class="col-log-text">${entry.text}</td></tr>`; });
-            container.innerHTML = tableHTML + `</tbody></table>`;
+            return tableHTML + `</tbody></table>`;
         }
         
-        // --- UTILITY AND SCORING FUNCTIONS ---
+        renderNotes(data) {
+            if (!data || !data.notes || data.notes.length === 0) return 'No notes found.';
+            let tableHTML = `<table class="enhancer-table"><thead><tr><th>Date</th><th>Creator</th><th>Note</th></tr></thead><tbody>`;
+            data.notes.forEach(note => { tableHTML += `<tr><td>${new Date(note.createdOn).toLocaleString()}</td><td>${note.creator.firstName} ${note.creator.lastName}</td><td>${note.note}</td></tr>`; });
+            return tableHTML + `</tbody></table>`;
+        }
+
+        renderActivityLog(data) {
+            if (!data || !data.logEntries || data.logEntries.length === 0) return 'No activity log entries found.';
+            let tableHTML = `<table class="enhancer-table"><thead><tr><th>Date</th><th>Actor</th><th>Action</th></tr></thead><tbody>`;
+            data.logEntries.forEach(entry => { tableHTML += `<tr><td>${new Date(entry.createdDate).toLocaleString()}</td><td>${entry.actor.firstName} ${entry.actor.lastName}</td><td class="col-log-text">${entry.text}</td></tr>`; });
+            return tableHTML + `</tbody></table>`;
+        }
+
+        // UTILITY AND SCORING FUNCTIONS (UNCHANGED)
         formatKey(key) { if (!key) return ''; return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()); }
-        formatValue(value, key = '') { /* ... unchanged ... */ if (value === null || value === undefined || String(value).trim() === '') return 'N/A'; if (typeof value === 'boolean') return value ? 'Yes' : 'No'; const lowerKey = key.toLowerCase(); if (typeof value === 'number') { if (lowerKey.includes('price') || lowerKey.includes('cost') || lowerKey.includes('spend') || lowerKey.includes('fee') || lowerKey.includes('budget')) return `$${value.toFixed(2)}`; if (lowerKey === 'distance') return `${value.toFixed(1)} mi`; if ((lowerKey.includes('percentage') || lowerKey.includes('rate') || lowerKey.includes('ratio')) && !lowerKey.includes('rating')) { if (value >= 0 && value <= 1.000001) return `${(value * 100).toFixed(2)}%`; } return value.toFixed(2); } return String(value); }
-        calculateOverallScore(techData, assignmentBudget = 350) { /* ... unchanged ... */ let CS = 50, DS = 0, SS = 50, OS = 0; const totalCost = techData.negotiation?.pricing?.total_cost; if (totalCost !== undefined && totalCost !== null) { CS = Math.max(0, (1 - (parseFloat(totalCost) / assignmentBudget)) * 100); } const distance = techData.distance; if (distance !== undefined && distance !== null) { if (distance <= 40) DS = Math.max(0, (1 - (distance / 80)) * 100); else if (distance <= 60) DS = 20; else if (distance <= 80) DS = 10; else DS = 0; } let CPS_Final = 50; const rscCompany = techData.resourceCompanyScoreCard?.scores; const rscIndividual = techData.resourceScoreCard; if (rscCompany) { const compCompletedNet90 = rscCompany.COMPLETED_WORK?.net90; if (compCompletedNet90 !== undefined && compCompletedNet90 !== null && compCompletedNet90 > 0) { const satNet90 = rscCompany.SATISFACTION_OVER_ALL?.net90 || 0; const onTimeNet90 = rscCompany.ON_TIME_PERCENTAGE?.net90 || 0; const reliabilityNet90Factor = Math.min(1, (compCompletedNet90 || 0) / 5); const negNet90Count = (rscCompany.CANCELLED_WORK?.net90 || 0) + (rscCompany.LATE_WORK?.net90 || 0) + (rscCompany.ABANDONED_WORK?.net90 || 0); CPS_Final = ((satNet90 * 0.45) + (onTimeNet90 * 0.35) + (reliabilityNet90Factor * 0.20) - (negNet90Count * 0.10)) * 100; } else if (rscCompany.COMPLETED_WORK?.all !== undefined && rscCompany.COMPLETED_WORK?.all > 0) { const satAll = rscCompany.SATISFACTION_OVER_ALL?.all || 0; const onTimeAll = rscCompany.ON_TIME_PERCENTAGE?.all || 0; const reliabilityAllFactor = Math.min(1, (rscCompany.COMPLETED_WORK?.all || 0) / 5); const negAllCount = (rscCompany.CANCELLED_WORK?.all || 0) + (rscCompany.LATE_WORK?.all || 0) + (rscCompany.ABANDONED_WORK?.all || 0); const CPS_All_Raw = ((satAll * 0.45) + (onTimeAll * 0.35) + (reliabilityAllFactor * 0.20) - (negAllCount * 0.10)) * 100; CPS_Final = CPS_All_Raw * 0.85; } } let IPS = 50; if (rscIndividual?.ratingSummary && rscIndividual?.scores) { if (rscIndividual.ratingSummary.count > 0) { const satInd = rscIndividual.ratingSummary.satisfactionRate || 0; const onTimeInd = rscIndividual.scores.ON_TIME_PERCENTAGE?.all || 0; const reliabilityIndFactor = Math.min(1, (rscIndividual.ratingSummary.count || 0) / 50); const negIndCount = (rscIndividual.scores.CANCELLED_WORK?.all || 0) + (rscIndividual.scores.LATE_WORK?.all || 0) + (rscIndividual.scores.ABANDONED_WORK?.all || 0); IPS = ((satInd * 0.40) + (onTimeInd * 0.30) + (reliabilityIndFactor * 0.30) - (negIndCount * 0.02)) * 100; } } else if (techData.newUser === true) { IPS = 50; } if (rscCompany?.COMPLETED_WORK?.net90 > 0) SS = (CPS_Final * 0.80) + (IPS * 0.20); else if (rscCompany?.COMPLETED_WORK?.all > 0) SS = (CPS_Final * 0.65) + (IPS * 0.35); else SS = IPS; SS = Math.max(0, Math.min(100, SS)); CPS_Final = Math.max(0, Math.min(100, CPS_Final)); IPS = Math.max(0, Math.min(100, IPS)); CS = Math.max(0, Math.min(100, CS)); DS = Math.max(0, Math.min(100, DS)); OS = (CS * 0.30) + (DS * 0.15) + (SS * 0.55); OS = Math.max(0, Math.min(100, OS)); return { OverallScore: OS.toFixed(2), CostScore: CS.toFixed(2), DistanceScore: DS.toFixed(2), StatsScore: SS.toFixed(2), CPS_Final: CPS_Final.toFixed(2), IPS: IPS.toFixed(2) }; }
+        formatValue(value, key = '') {
+            if (value === null || value === undefined || String(value).trim() === '') return 'N/A';
+            if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+            const lowerKey = key.toLowerCase();
+            if (typeof value === 'number') {
+                if (lowerKey.includes('cost') || lowerKey.includes('budget') || lowerKey.includes('price')) return `$${value.toFixed(2)}`;
+                if (lowerKey === 'distance') return `${value.toFixed(1)} mi`;
+                return value.toFixed(2);
+            }
+            return String(value);
+        }
+        calculateOverallScore(techData, assignmentBudget = 350) {
+            let CS = 50, DS = 0, SS = 50, OS = 0; const totalCost = techData.negotiation?.pricing?.total_cost;
+            if (totalCost !== undefined && totalCost !== null) { CS = Math.max(0, (1 - (parseFloat(totalCost) / assignmentBudget)) * 100); }
+            const distance = techData.distance;
+            if (distance !== undefined && distance !== null) {
+                if (distance <= 40) DS = Math.max(0, (1 - (distance / 80)) * 100); else if (distance <= 60) DS = 20; else if (distance <= 80) DS = 10; else DS = 0;
+            }
+            let CPS_Final = 50; const rscCompany = techData.resourceCompanyScoreCard?.scores; const rscIndividual = techData.resourceScoreCard;
+            if (rscCompany) {
+                const compCompletedNet90 = rscCompany.COMPLETED_WORK?.net90;
+                if (compCompletedNet90 > 0) { const satNet90 = rscCompany.SATISFACTION_OVER_ALL?.net90 || 0; const onTimeNet90 = rscCompany.ON_TIME_PERCENTAGE?.net90 || 0; const reliabilityNet90Factor = Math.min(1, (compCompletedNet90 || 0) / 5); const negNet90Count = (rscCompany.CANCELLED_WORK?.net90 || 0) + (rscCompany.LATE_WORK?.net90 || 0) + (rscCompany.ABANDONED_WORK?.net90 || 0); CPS_Final = ((satNet90 * 0.45) + (onTimeNet90 * 0.35) + (reliabilityNet90Factor * 0.20) - (negNet90Count * 0.10)) * 100;
+                } else if (rscCompany.COMPLETED_WORK?.all > 0) { const satAll = rscCompany.SATISFACTION_OVER_ALL?.all || 0; const onTimeAll = rscCompany.ON_TIME_PERCENTAGE?.all || 0; const reliabilityAllFactor = Math.min(1, (rscCompany.COMPLETED_WORK?.all || 0) / 5); const negAllCount = (rscCompany.CANCELLED_WORK?.all || 0) + (rscCompany.LATE_WORK?.all || 0) + (rscCompany.ABANDONED_WORK?.all || 0); const CPS_All_Raw = ((satAll * 0.45) + (onTimeAll * 0.35) + (reliabilityAllFactor * 0.20) - (negAllCount * 0.10)) * 100; CPS_Final = CPS_All_Raw * 0.85; }
+            }
+            let IPS = 50;
+            if (rscIndividual?.ratingSummary?.count > 0) { const satInd = rscIndividual.ratingSummary.satisfactionRate || 0; const onTimeInd = rscIndividual.scores.ON_TIME_PERCENTAGE?.all || 0; const reliabilityIndFactor = Math.min(1, (rscIndividual.ratingSummary.count || 0) / 50); const negIndCount = (rscIndividual.scores.CANCELLED_WORK?.all || 0) + (rscIndividual.scores.LATE_WORK?.all || 0) + (rscIndividual.scores.ABANDONED_WORK?.all || 0); IPS = ((satInd * 0.40) + (onTimeInd * 0.30) + (reliabilityIndFactor * 0.30) - (negIndCount * 0.02)) * 100; }
+            else if (techData.newUser === true) { IPS = 50; }
+            if (rscCompany?.COMPLETED_WORK?.net90 > 0) SS = (CPS_Final * 0.80) + (IPS * 0.20); else if (rscCompany?.COMPLETED_WORK?.all > 0) SS = (CPS_Final * 0.65) + (IPS * 0.35); else SS = IPS;
+            SS = Math.max(0, Math.min(100, SS)); CPS_Final = Math.max(0, Math.min(100, CPS_Final)); IPS = Math.max(0, Math.min(100, IPS)); CS = Math.max(0, Math.min(100, CS)); DS = Math.max(0, Math.min(100, DS));
+            OS = (CS * 0.30) + (DS * 0.15) + (SS * 0.55); OS = Math.max(0, Math.min(100, OS));
+            return { OverallScore: OS.toFixed(2), CostScore: CS.toFixed(2), DistanceScore: DS.toFixed(2), StatsScore: SS.toFixed(2), CPS_Final: CPS_Final.toFixed(2), IPS: IPS.toFixed(2) };
+        }
     }
 
     // --- Script Entry Point & SPA Navigation Handler ---
@@ -248,13 +265,11 @@
 
     function onUrlChange() {
         setTimeout(() => {
-            const enhancerBtn = document.getElementById('enhancer-trigger-btn');
+            const rootEl = document.getElementById('enhancer-root');
             if (location.href.includes('/assignments/details/')) {
-                if (!enhancerBtn) { new WorkMarketPopupEnhancer(); }
+                if (!rootEl) new PageRedesigner();
             } else {
-                if (enhancerBtn) enhancerBtn.remove();
-                const overlay = document.getElementById('enhancer-overlay');
-                if (overlay) overlay.remove();
+                if (rootEl) rootEl.remove();
             }
         }, 500);
     }
